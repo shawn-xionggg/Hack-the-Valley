@@ -1,17 +1,18 @@
 import "./style.css";
-import { SURFACES, ZONE_LAYOUT_STORAGE_KEY } from "./shared/config";
-import type { Point, ZoneLayout, ZonedObjectId } from "./shared/config";
+import { SURFACES, UTENSIL_MODELS_STORAGE_KEY, ZONE_LAYOUT_STORAGE_KEY } from "./shared/config";
+import type { Point, Polygon, ToolSurface, UtensilModels, ZoneLayout, ZonedObjectId } from "./shared/config";
 import type { ContactEvent, VisionStatus, WashEvent } from "./shared/events";
 import type { VisionHandle } from "./shared/vision-types";
 import type { HandLandmarkerResult } from "@mediapipe/tasks-vision";
 import { startVision } from "./vision";
-import { overlappingZones, validatePolygon } from "./vision/geometry";
+import { overlappingZones, polygonsOverlap, validatePolygon } from "./vision/geometry";
 import { fixedUtensilStatus } from "./vision/tracker";
+import { calibrateMarker, parseUtensilModels } from "./vision/pose";
 import {
   GO_NO_GO_RATE, MIN_MARKER_SIDE_PX, TONG_MARKER_IDS, createMarkerSvg, createMarkerTrial, createTongMarkerSheet,
-  drawMarkerBoxes, markerSidePx, recordMarkerFrame, startMarkerDetection,
+  drawMarkerBoxes, markerSidePx, recordMarkerFrame,
 } from "./vision/aruco";
-import type { DetectedMarker, MarkerDictionary, MarkerTrial } from "./vision/aruco";
+import type { DetectedMarker, MarkerTrial } from "./vision/aruco";
 
 const zoneIds: ZonedObjectId[] = ["peanut-source", "tongs-tip", "tongs-handle", "meal-1", "wash-station"];
 const colors = ["#f8bd72", "#baabff", "#84b8ff", "#fc91ac", "#79ddc1"];
@@ -25,6 +26,9 @@ try {
       Array.isArray(p) && p.length === 2 && p.every(n => typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1));
   })) zones = stored as ZoneLayout;
 } catch { /* Storage can be unavailable; calibration still works for this session. */ }
+let utensilModels: UtensilModels = {};
+try { utensilModels = parseUtensilModels(JSON.parse(localStorage.getItem(UTENSIL_MODELS_STORAGE_KEY) ?? "null")); }
+catch { /* As above: without stored models the tongs start "fixed". */ }
 
 document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
   <header class="topbar">
@@ -61,9 +65,12 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         </section>
         <section class="panel markers-panel"><div class="panel-heading"><h2>Tong markers</h2><span class="mono" id="marker-frame">—</span></div>
           <div class="status-row"><label class="check"><input type="checkbox" id="marker-enabled" checked /> ArUco boxes</label><span id="marker-status" role="status">Camera offline</span></div>
-          <div class="status-row"><label for="marker-dictionary">Marker dictionary</label><select id="marker-dictionary" aria-describedby="marker-help"><option value="ARUCO_4X4_50">4×4 / 50 (OpenCV)</option><option value="ARUCO_MIP_36h12">MIP 36h12</option><option value="ARUCO">ArUco original</option></select></div>
+          <div class="status-row"><span>Tong tracking</span><span id="tong-tracking">—</span></div>
+          <div class="status-row"><span>Calibrated faces</span><span id="calibrated-faces">None</span></div>
+          <div class="zone-actions">${TONG_MARKER_IDS.map(id => `<button class="text-button" data-calibrate="${id}" disabled>Calibrate ID ${id}</button>`).join("")}<button class="text-button" id="clear-calibration">Clear calibration</button></div>
+          <p class="hint" id="calibration-help"></p>
           <div class="zone-actions"><button class="text-button" id="print-markers">Print tong markers 11 + 12</button><button class="text-button" id="download-marker">Download test marker #0</button></div>
-          <p class="hint" id="marker-help">The tong sheet prints IDs 11 and 12 at 25 mm and 30 mm (4×4 / 50). Print at 100% and check its 50 mm bar. The test marker uses the selected dictionary.</p>
+          <p class="hint">The tong sheet prints IDs 11 and 12 at 25 mm and 30 mm (OpenCV 4×4 / 50). Print at 100% and check its 50 mm bar.</p>
           <div class="status-row"><span>Go/no-go</span><span id="trial-summary">No trials yet</span></div>
           <div class="zone-actions"><button class="text-button" id="trial-toggle" disabled>Start trial (T)</button><button class="text-button" id="trial-clear" disabled>Clear trials</button></div>
           <ol id="trial-list" class="trial-list"></ol>
@@ -92,9 +99,9 @@ const stop = el<HTMLButtonElement>("stop");
 const camera = el<HTMLSelectElement>("camera");
 const mirror = el<HTMLInputElement>("mirror");
 const markerEnabled = el<HTMLInputElement>("marker-enabled");
-const markerDictionary = el<HTMLSelectElement>("marker-dictionary");
-let markerDetection: { stop(): void } | undefined;
 let markers: DetectedMarker[] = [];
+/** Jaw ends of the current tong pose (tracked or held), for the overlay. */
+let jawPoints: Point[] | null = null;
 /** The go/no-go trial being recorded, if any, and the finished ones. */
 let trial: MarkerTrial | undefined;
 const trials: MarkerTrial[] = [];
@@ -103,13 +110,31 @@ let vision: VisionHandle | undefined;
 let generation = 0;
 let running = false;
 let selectedZone: ZonedObjectId | undefined;
-/** Vertices placed so far for the selected zone, in raw normalized coordinates. */
+/**
+ * Tong calibration for one face (§4.4): the marker's corners are frozen when it starts, then the
+ * tip and handle are outlined and the jaw ends clicked, all on the raw frame.
+ */
+type CalibrationStep = ToolSurface | "jaws";
+let calibration: { markerId: number; corners: Point[]; step: CalibrationStep; parts: Partial<Record<ToolSurface, Polygon>> } | undefined;
+/** Vertices placed so far for the selected zone or calibration step, in raw normalized coordinates. */
 let draft: Point[] = [];
 let cursor: Point | undefined;
 const CLOSE_RADIUS_PX = 12; // clicking this close to the first vertex closes the polygon
 const MIN_VERTEX_GAP_PX = 6; // clicks this close to the previous vertex are ignored (double-clicks)
 const DRAW_HELP = "Click to place corners. Click the first corner or press Enter to finish · Backspace undoes · Esc cancels.";
 const IDLE_HELP = "Zones are saved on this device. Recalibrate after moving the camera or switching cameras.";
+const CALIBRATION_IDLE_HELP = "Lay the tongs flat and closed with one marker face up, then calibrate that face. Repeat with the tongs flipped. Keep them still while you draw.";
+const CALIBRATION_STEPS: Record<CalibrationStep, string> = {
+  "tongs-tip": `Outline the tong tips. Pad the outline past the jaws so open jaws stay inside. ${DRAW_HELP}`,
+  "tongs-handle": `Outline the handle, leaving a gap over the hinge. ${DRAW_HELP}`,
+  jaws: "Click the jaw end (one or two points), then press Enter · Backspace undoes · Esc cancels.",
+};
+const TRACKING_LABELS: Record<VisionStatus["utensils"]["tongs"]["tracking"], string> = {
+  tracked: "Tracked",
+  held: "Held (last pose)",
+  lost: "Tong tracking lost — contacts not recorded",
+  fixed: "Tongs: fixed position",
+};
 let lastResults: HandLandmarkerResult | undefined;
 let status: VisionStatus | undefined;
 const events: (ContactEvent | WashEvent)[] = [];
@@ -119,17 +144,35 @@ function message(text: string, error = false) {
   el("message").classList.toggle("error", error);
 }
 
+/** Tip and handle follow the tracked pose; everything else (and fixed tongs) uses the static layout. */
+function zonePolygon(id: ZonedObjectId): Polygon {
+  const tongs = status?.utensils.tongs;
+  if ((id === "tongs-tip" || id === "tongs-handle") && tongs && tongs.tracking !== "fixed") return tongs.parts?.[id] ?? [];
+  return zones[id];
+}
+
+function tracePolygon(polygon: Polygon, w: number, h: number) {
+  ctx.beginPath();
+  polygon.forEach(([x, y], n) => n === 0 ? ctx.moveTo(x * w, y * h) : ctx.lineTo(x * w, y * h));
+  ctx.closePath();
+}
+
+function draftColor(): string {
+  if (calibration) return calibration.step === "jaws" ? "#ffffff" : colors[zoneIds.indexOf(calibration.step)]!;
+  return colors[zoneIds.indexOf(selectedZone!)] ?? "#ffffff";
+}
+
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   const w = canvas.width, h = canvas.height;
   zoneIds.forEach((id, i) => {
-    const polygon = zones[id];
+    const polygon = zonePolygon(id);
     if (!polygon.length) return;
-    ctx.beginPath();
-    polygon.forEach(([x, y], n) => n === 0 ? ctx.moveTo(x * w, y * h) : ctx.lineTo(x * w, y * h));
-    ctx.closePath();
+    const active = status?.activeZones.some(zone => zone === id) ||
+      status?.activeToolContacts.some(({ a, b }) => a === id || b === id);
+    tracePolygon(polygon, w, h);
     ctx.strokeStyle = colors[i]!;
-    ctx.fillStyle = `${colors[i]}${status?.activeZones.some(active => active === id) ? "44" : "14"}`;
+    ctx.fillStyle = `${colors[i]}${active ? "44" : "14"}`;
     ctx.lineWidth = selectedZone === id ? 4 : 2;
     ctx.fill(); ctx.stroke();
   });
@@ -145,9 +188,29 @@ function draw() {
     }
     hand.forEach((p, n) => { ctx.beginPath(); ctx.arc(p.x * w, p.y * h, [4, 8, 12, 16, 20].includes(n) ? 5 : 3, 0, Math.PI * 2); ctx.fill(); });
   });
-  drawMarkerBoxes(ctx, markers, mirror.checked);
+  // Jaw ends: the only points tested for tip tool contacts.
+  jawPoints?.forEach(([x, y]) => {
+    ctx.beginPath(); ctx.arc(x * w, y * h, 6, 0, Math.PI * 2);
+    ctx.fillStyle = "#ffffff"; ctx.fill();
+    ctx.strokeStyle = colors[1]!; ctx.lineWidth = 3; ctx.stroke();
+  });
+  if (markerEnabled.checked) drawMarkerBoxes(ctx, markers, mirror.checked);
+  if (calibration) {
+    // The frozen marker pose that this face's drawing is measured against.
+    tracePolygon(calibration.corners, w, h);
+    ctx.setLineDash([5, 4]); ctx.strokeStyle = "#ffdc70"; ctx.lineWidth = 3; ctx.stroke(); ctx.setLineDash([]);
+    for (const part of ["tongs-tip", "tongs-handle"] as const) {
+      const polygon = calibration.parts[part];
+      if (!polygon) continue;
+      tracePolygon(polygon, w, h);
+      ctx.strokeStyle = colors[zoneIds.indexOf(part)]!; ctx.fillStyle = `${colors[zoneIds.indexOf(part)]}33`; ctx.lineWidth = 2;
+      ctx.fill(); ctx.stroke();
+    }
+  }
   const first = draft[0], last = draft[draft.length - 1];
-  if (first && last) {
+  if (first && last && calibration?.step === "jaws") {
+    draft.forEach(([x, y]) => { ctx.beginPath(); ctx.arc(x * w, y * h, 6, 0, Math.PI * 2); ctx.fillStyle = "#ffffff"; ctx.fill(); });
+  } else if (first && last) {
     const closing = canClose();
     ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 2;
     ctx.beginPath();
@@ -163,7 +226,7 @@ function draw() {
     draft.forEach(([x, y], n) => {
       ctx.beginPath();
       ctx.arc(x * w, y * h, n === 0 && closing ? 8 : 4, 0, Math.PI * 2);
-      ctx.fillStyle = n === 0 ? colors[zoneIds.indexOf(selectedZone!)] ?? "#ffffff" : "#ffffff";
+      ctx.fillStyle = n === 0 ? draftColor() : "#ffffff";
       ctx.fill();
     });
   }
@@ -176,7 +239,7 @@ function screenDistance(a: Point, b: Point): number {
 }
 
 function canClose(): boolean {
-  return draft.length >= 3 && !!cursor && screenDistance(cursor, draft[0]!) <= CLOSE_RADIUS_PX;
+  return calibration?.step !== "jaws" && draft.length >= 3 && !!cursor && screenDistance(cursor, draft[0]!) <= CLOSE_RADIUS_PX;
 }
 
 function updateStatus(next: VisionStatus) {
@@ -184,9 +247,14 @@ function updateStatus(next: VisionStatus) {
   el("hands").textContent = String(next.handsVisible);
   el("fps").textContent = String(next.fps);
   el("landmarks").textContent = `${next.handsVisible * 21} points`;
-  el("active").textContent = next.activeZones.map(id => SURFACES[id].label).join(", ") || "None";
+  el("active").textContent = [
+    ...next.activeZones.map(id => SURFACES[id].label),
+    ...next.activeToolContacts.map(({ a, b }) => `${SURFACES[a].label} → ${SURFACES[b].label}`),
+  ].join(", ") || "None";
   el<HTMLProgressElement>("wash").value = next.washProgress;
   el("wash-text").textContent = `${Math.round(next.washProgress * 100)}%`;
+  el("tong-tracking").textContent = running ? TRACKING_LABELS[next.utensils.tongs.tracking] : "—";
+  el("tong-tracking").classList.toggle("warn", running && next.utensils.tongs.tracking === "lost");
 }
 
 function logEvent(event: ContactEvent | WashEvent) {
@@ -201,7 +269,9 @@ function logEvent(event: ContactEvent | WashEvent) {
     : "Wash zone dwell completed · unverified";
   const detail = document.createElement("span");
   detail.className = "event-detail";
-  detail.textContent = event.kind === "contact" ? `${Math.round(event.confidence * 100)}% overlap frames` : `${((event.durationMs ?? 0) / 1000).toFixed(1)}s in zone`;
+  detail.textContent = event.kind === "contact"
+    ? `${Math.round(event.confidence * 100)}% ${event.a === "hands" ? "overlap" : "tracked"} frames`
+    : `${((event.durationMs ?? 0) / 1000).toFixed(1)}s in zone`;
   row.append(time, label, detail);
   el("events").prepend(row);
   while (el("events").children.length > 30) el("events").lastElementChild?.remove();
@@ -212,11 +282,23 @@ function logEvent(event: ContactEvent | WashEvent) {
   window.dispatchEvent(new CustomEvent("ghosttrace:vision-event", { detail: event }));
 }
 
+function onMarkers(next: DetectedMarker[], frame: { width: number; height: number; ms: number }) {
+  markers = next;
+  // Side length is what decides whether a tag is big enough (§4.4: ≥ 30 px).
+  el("marker-status").textContent = next.length ? next.map(m => {
+    const side = Math.round(markerSidePx(m, frame.width, frame.height));
+    return `${m.id} · ${side} px${side < MIN_MARKER_SIDE_PX ? " ⚠" : ""}`;
+  }).join(", ") : "No markers visible";
+  el("marker-frame").textContent = `${frame.width} × ${frame.height} · ${Math.round(frame.ms)} MS`;
+  if (trial) { recordMarkerFrame(trial, next, frame); renderTrials(); }
+}
+
 function stopCamera(text = "Camera stopped. Start it again whenever you’re ready.") {
   generation++;
   running = false;
   vision?.stop(); vision = undefined;
-  markerDetection?.stop(); markerDetection = undefined; markers = [];
+  markers = []; jawPoints = null;
+  endCalibration();
   endTrial();
   el("marker-status").textContent = "Camera offline";
   el("marker-frame").textContent = "—";
@@ -233,6 +315,7 @@ function stopCamera(text = "Camera stopped. Start it again whenever you’re rea
   el("model-state").textContent = "Not loaded";
   el("resolution").textContent = "AWAITING CAMERA";
   start.disabled = false; stop.disabled = true; camera.disabled = false;
+  renderCalibration();
   message(text);
 }
 
@@ -255,19 +338,23 @@ async function startCamera() {
     canvas.width = video.videoWidth; canvas.height = video.videoHeight;
     el("stage").style.aspectRatio = `${canvas.width} / ${canvas.height}`;
     el("empty").hidden = true;
-    restartMarkers();
     el("resolution").textContent = `${canvas.width} × ${canvas.height} / RAW`;
     el("model-state").textContent = "Loading…";
+    el("marker-status").textContent = "Starting…";
     message("Camera connected. Downloading the hand-tracking model — the first start may take a moment…");
     draw();
-    const handle = await startVision({ video, zones, onEvent: logEvent,
-      onStatus: updateStatus,
-      onResults: result => { lastResults = result; draw(); },
+    const handle = await startVision({ video, zones, utensilModels, onEvent: logEvent,
+      onStatus: next => { updateStatus(next); draw(); },
+      onResults: result => { lastResults = result; },
+      onMarkers,
+      onJawPoints: points => { jawPoints = points; },
       onError: error => { stopCamera(); message(`Tracking stopped: ${error instanceof Error ? error.message : String(error)}. Try starting again.`, true); },
     });
     if (attempt !== generation) { handle.stop(); return; }
     vision = handle;
     running = true;
+    renderTrials();
+    renderCalibration();
     el("model-state").textContent = "MediaPipe · ready";
     el("badge").textContent = "● Tracking live";
     el("badge").classList.add("live");
@@ -317,16 +404,18 @@ function pointer(event: PointerEvent): Point {
   const x = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
   return [mirror.checked ? 1 - x : x, Math.max(0, Math.min(1, (event.clientY - bounds.top) / bounds.height))];
 }
-/** Switching zones (or deselecting) always discards an unfinished outline. */
+/** Switching zones (or deselecting) always discards an unfinished outline, and any tong calibration. */
 function selectZone(next: ZonedObjectId | undefined) {
+  if (next) endCalibration();
   selectedZone = next;
   draft = []; cursor = undefined;
-  canvas.classList.toggle("calibrating", !!next);
+  canvas.classList.toggle("calibrating", !!next || !!calibration);
   saveZones();
   el("zone-help").textContent = next ? `Outline ${SURFACES[next].label}. ${DRAW_HELP}` : IDLE_HELP;
 }
 
 function finishDraft() {
+  if (calibration) { finishCalibrationStep(); return; }
   if (!selectedZone) return;
   const error = validatePolygon(draft);
   if (error) { el("zone-help").textContent = error; return; }
@@ -348,22 +437,100 @@ function overlapWarning(id: ZonedObjectId, others: ZonedObjectId[]): string {
   return `⚠ ${SURFACES[id].label} saved, but it overlaps ${others.map(other => SURFACES[other].label).join(", ")}. ${reasons}`;
 }
 
+function renderCalibration() {
+  const calibrated = new Set(utensilModels.tongs?.markers.map(m => m.markerId));
+  el("calibrated-faces").textContent = TONG_MARKER_IDS.map(id => `${id} ${calibrated.has(id) ? "✓" : "—"}`).join(" · ");
+  document.querySelectorAll<HTMLButtonElement>("[data-calibrate]").forEach(button => {
+    button.disabled = !running;
+    button.setAttribute("aria-pressed", String(calibration?.markerId === Number(button.dataset.calibrate)));
+  });
+  el<HTMLButtonElement>("clear-calibration").disabled = !calibrated.size;
+  if (!calibration) el("calibration-help").textContent = CALIBRATION_IDLE_HELP;
+}
+
+function startCalibration(markerId: number) {
+  // Freeze the tag as it is now: the outlines are measured against this one pose.
+  const marker = markers.find(m => m.id === markerId);
+  if (!running || !marker) {
+    el("calibration-help").textContent = `ID ${markerId} isn't in view. Lay the tongs flat and closed with ID ${markerId} face up, then try again.`;
+    return;
+  }
+  selectZone(undefined);
+  calibration = { markerId, corners: marker.corners, step: "tongs-tip", parts: {} };
+  draft = []; cursor = undefined;
+  canvas.classList.add("calibrating");
+  el("calibration-help").textContent = `ID ${markerId}: ${CALIBRATION_STEPS["tongs-tip"]}`;
+  renderCalibration();
+  draw();
+}
+
+function endCalibration(text?: string) {
+  if (!calibration) return;
+  calibration = undefined;
+  draft = []; cursor = undefined;
+  canvas.classList.toggle("calibrating", !!selectedZone);
+  renderCalibration();
+  if (text) el("calibration-help").textContent = text;
+  draw();
+}
+
+function finishCalibrationStep() {
+  const c = calibration!;
+  if (c.step !== "jaws") {
+    const error = validatePolygon(draft);
+    if (error) { el("calibration-help").textContent = error; return; }
+    c.parts[c.step] = draft;
+    draft = [];
+    c.step = c.step === "tongs-tip" ? "tongs-handle" : "jaws";
+    const tip = c.parts["tongs-tip"], handle = c.parts["tongs-handle"];
+    const hinge = tip && handle && polygonsOverlap(tip, handle) ? "⚠ Tip and handle overlap: a gap over the hinge keeps their touches apart. " : "";
+    el("calibration-help").textContent = `ID ${c.markerId}: ${hinge}${CALIBRATION_STEPS[c.step]}`;
+    draw();
+    return;
+  }
+  const tip = c.parts["tongs-tip"], handle = c.parts["tongs-handle"];
+  if (!draft.length) { el("calibration-help").textContent = `ID ${c.markerId}: click at least one jaw end first.`; return; }
+  if (!tip || !handle) return;
+  const entry = calibrateMarker(c.markerId, c.corners, { "tongs-tip": tip, "tongs-handle": handle }, draft);
+  if (!entry) { endCalibration(`ID ${c.markerId}: the marker outline was too distorted to calibrate. Lay the tongs flat and try again.`); return; }
+  utensilModels = { tongs: { markers: [...(utensilModels.tongs?.markers ?? []).filter(m => m.markerId !== c.markerId), entry] } };
+  saveUtensilModels();
+  const missing = TONG_MARKER_IDS.filter(id => !utensilModels.tongs?.markers.some(m => m.markerId === id));
+  endCalibration(`ID ${c.markerId} calibrated.${missing.length ? ` Flip the tongs and calibrate ID ${missing.join(", ")}.` : " Both faces are calibrated."}`);
+}
+
+function saveUtensilModels() {
+  vision?.setUtensilModels(utensilModels);
+  try {
+    if (utensilModels.tongs) localStorage.setItem(UTENSIL_MODELS_STORAGE_KEY, JSON.stringify(utensilModels));
+    else localStorage.removeItem(UTENSIL_MODELS_STORAGE_KEY);
+  } catch { el("calibration-help").textContent = "Browser storage is unavailable. This calibration will last for this session only."; }
+  renderCalibration();
+}
+
 canvas.addEventListener("pointerdown", event => {
-  if (!selectedZone || !stream) return;
+  if ((!selectedZone && !calibration) || !stream) return;
   cursor = pointer(event);
-  if (canClose()) { finishDraft(); return; }
   const last = draft[draft.length - 1];
+  if (calibration?.step === "jaws") {
+    if (last && screenDistance(cursor, last) < MIN_VERTEX_GAP_PX) return;
+    draft.push(cursor);
+    if (draft.length === 2) finishDraft(); // at most two jaw ends
+    draw();
+    return;
+  }
+  if (canClose()) { finishDraft(); return; }
   if (last && screenDistance(cursor, last) < MIN_VERTEX_GAP_PX) return;
   draft.push(cursor);
   draw();
 });
-canvas.addEventListener("pointermove", event => { if (selectedZone && draft.length) { cursor = pointer(event); draw(); } });
+canvas.addEventListener("pointermove", event => { if ((selectedZone || calibration) && draft.length) { cursor = pointer(event); draw(); } });
 canvas.addEventListener("pointerleave", () => { cursor = undefined; draw(); });
 window.addEventListener("keydown", event => {
-  if (!selectedZone || event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) return;
+  if ((!selectedZone && !calibration) || event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) return;
   if (event.key === "Enter") finishDraft();
   else if (event.key === "Backspace" && draft.length) draft.pop();
-  else if (event.key === "Escape") selectZone(undefined);
+  else if (event.key === "Escape") { if (calibration) endCalibration("Calibration cancelled. Nothing was saved."); else selectZone(undefined); }
   else return;
   event.preventDefault(); // stops Enter from also "clicking" the focused zone button
   draw();
@@ -371,6 +538,17 @@ window.addEventListener("keydown", event => {
 document.querySelectorAll<HTMLButtonElement>("[data-zone]").forEach(button => button.addEventListener("click", () => {
   selectZone(selectedZone === button.dataset.zone ? undefined : button.dataset.zone as ZonedObjectId);
 }));
+document.querySelectorAll<HTMLButtonElement>("[data-calibrate]").forEach(button => button.addEventListener("click", () => {
+  const id = Number(button.dataset.calibrate);
+  if (calibration?.markerId === id) endCalibration("Calibration cancelled. Nothing was saved.");
+  else { endCalibration(); startCalibration(id); }
+}));
+el("clear-calibration").addEventListener("click", () => {
+  endCalibration();
+  utensilModels = {};
+  saveUtensilModels();
+  el("calibration-help").textContent = "Calibration cleared. The tongs use their fixed zones until a face is calibrated.";
+});
 el("presets").addEventListener("click", () => {
   zoneIds.forEach((id, i) => { const x = 0.035 + i * 0.195; zones[id] = [[x, 0.6], [x + 0.15, 0.6], [x + 0.15, 0.93], [x, 0.93]]; });
   saveZones(); el("zone-help").textContent = "Demo zones placed along the bottom of the frame. These are placeholders; calibrate them to match your surfaces.";
@@ -381,39 +559,7 @@ stop.addEventListener("click", () => stopCamera());
 camera.addEventListener("change", () => { if (running) { stopCamera(); void startCamera(); } });
 mirror.addEventListener("change", () => el("feed").classList.toggle("mirrored", mirror.checked));
 mirror.addEventListener("change", draw);
-function restartMarkers() {
-  markerDetection?.stop(); markerDetection = undefined; markers = [];
-  endTrial();
-  el("marker-status").textContent = !stream ? "Camera offline" : !markerEnabled.checked ? "Disabled" : "Looking for markers…";
-  draw();
-  if (!stream || !markerEnabled.checked) return;
-  try {
-    markerDetection = startMarkerDetection(video, {
-      dictionary: markerDictionary.value as MarkerDictionary,
-      onMarkers: (next, frame) => {
-        markers = next;
-        // Side length is what decides whether a tag is big enough (§4.4: ≥ 30 px).
-        el("marker-status").textContent = next.length ? next.map(m => {
-          const side = Math.round(markerSidePx(m, frame.width, frame.height));
-          return `${m.id} · ${side} px${side < MIN_MARKER_SIDE_PX ? " ⚠" : ""}`;
-        }).join(", ") : "No markers visible";
-        el("marker-frame").textContent = `${frame.width} × ${frame.height} · ${Math.round(frame.ms)} MS`;
-        if (trial) { recordMarkerFrame(trial, next, frame); renderTrials(); }
-        draw();
-      },
-      onError: error => {
-        markers = []; markerDetection = undefined; draw();
-        endTrial();
-        el("marker-status").textContent = "Detection error";
-        console.error("ArUco detection failed", error);
-      },
-    });
-  } catch (error) {
-    el("marker-status").textContent = "Detection unavailable";
-    console.error("ArUco initialization failed", error);
-  }
-  renderTrials();
-}
+markerEnabled.addEventListener("change", draw);
 
 const percent = (part: number, whole: number) => whole ? Math.round(100 * part / whole) : 0;
 
@@ -429,7 +575,7 @@ function trialRow(t: MarkerTrial, n: number, recording: boolean) {
 function renderTrials() {
   const toggle = el<HTMLButtonElement>("trial-toggle");
   toggle.textContent = trial ? "End trial (T)" : "Start trial (T)";
-  toggle.disabled = !trial && !markerDetection;
+  toggle.disabled = !trial && !running;
   el<HTMLButtonElement>("trial-clear").disabled = !trials.length || !!trial;
   el("trial-list").replaceChildren(...[...trials.map((t, i) => trialRow(t, i + 1, false)), ...trial ? [trialRow(trial, 0, true)] : []].reverse());
   const frames = trials.reduce((sum, t) => sum + t.frames, 0);
@@ -448,14 +594,12 @@ function endTrial() {
 
 function toggleTrial() {
   if (trial) endTrial();
-  else if (markerDetection) { trial = createMarkerTrial(); renderTrials(); }
+  else if (running) { trial = createMarkerTrial(); renderTrials(); }
 }
-markerEnabled.addEventListener("change", restartMarkers);
-markerDictionary.addEventListener("change", restartMarkers);
+
 el("download-marker").addEventListener("click", () => {
-  const dictionary = markerDictionary.value as MarkerDictionary;
-  const url = URL.createObjectURL(new Blob([createMarkerSvg(dictionary)], { type: "image/svg+xml" }));
-  const anchor = document.createElement("a"); anchor.href = url; anchor.download = `aruco-${dictionary}-id-0.svg`; anchor.click();
+  const url = URL.createObjectURL(new Blob([createMarkerSvg()], { type: "image/svg+xml" }));
+  const anchor = document.createElement("a"); anchor.href = url; anchor.download = "aruco-4x4_50-id-0.svg"; anchor.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
 el("print-markers").addEventListener("click", () => {
@@ -476,9 +620,10 @@ el("clear-events").addEventListener("click", () => {
   el("events-empty").hidden = false; el<HTMLButtonElement>("export").disabled = true;
 });
 el("export").addEventListener("click", () => {
-  const url = URL.createObjectURL(new Blob([JSON.stringify({ zones, events }, null, 2)], { type: "application/json" }));
+  const url = URL.createObjectURL(new Blob([JSON.stringify({ zones, utensilModels, events }, null, 2)], { type: "application/json" }));
   const anchor = document.createElement("a"); anchor.href = url; anchor.download = "ghosttrace-vision.json"; anchor.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
 window.addEventListener("pagehide", () => stopCamera());
 saveZones();
+renderCalibration();

@@ -21,11 +21,11 @@ Open the localhost URL printed by Vite, click **Start camera**, and allow camera
 - **Stop** releases the camera and closes the model. Camera and model failures appear below the preview.
 - The log retains the latest 500 events and displays the latest 30. **Export JSON** downloads the retained events and calibrated zones.
 
-## ArUco marker boxes
+## Tong markers
 
-Start the camera with **ArUco boxes** enabled. Yellow quadrilaterals and IDs follow visible tags. The default dictionary is OpenCV **DICT_4X4_50**; **MIP 36h12** and **ArUco original** are also selectable. The selected dictionary must match the printed tag.
+The tongs carry two OpenCV **DICT_4X4_50** tags (spec A1 §4.4): ID 11 on arm A's outer face and ID 12 on arm B's, just behind the jaws. With **ArUco boxes** checked, yellow outlines and IDs follow visible tags; the small square marks each tag's corner 0.
 
-Click **Print tong markers 11 + 12** to open a print sheet with the tong tags (spec §4.4) at 25 mm and 30 mm black-square size. Print it at 100% scale, then check that its scale bar measures 50 mm before cutting. **Download test marker #0** downloads a quick test tag in the selected dictionary; print it or show it on another screen. Keep the white margin visible and present the tag flat to the camera. Multiple markers and rotated tags are supported. Labels stay readable when mirroring the feed. Boxes clear when tags disappear or the camera stops.
+Click **Print tong markers 11 + 12** to open a print sheet with the tong tags (spec §4.4) at 25 mm and 30 mm black-square size. Print it at 100% scale, then check that its scale bar measures 50 mm before cutting. **Download test marker #0** downloads a quick DICT_4X4_50 test tag; print it or show it on another screen. Keep the white margin visible and present the tag flat to the camera. Multiple markers and rotated tags are supported. Labels stay readable when mirroring the feed. Boxes clear when tags disappear or the camera stops.
 
 The **Tong markers** panel shows each visible tag's side length in pixels, flagged with ⚠ below the 30 px minimum. It also shows the detection frame size and the time each detection takes.
 
@@ -33,11 +33,34 @@ The **Tong markers** panel shows each visible tag's side length in pixels, flagg
 
 Mount both markers. Press **T** (or **Start trial**) as the dip starts, and press it again after the serve. Do 10 trials, 5 with each face up. Each trial records how many sampled frames showed ID 11 or 12, which faces were seen, and the smallest tag size. A trial passes at 80%, and the summary shows trials passed and the overall frame rate.
 
-`src/vision/aruco.ts` runs a separate local detector at up to 10 FPS on the camera's native resolution, using [js-aruco2](https://github.com/damianofalcioni/js-aruco2). Downscaling the 720p feed would halve marker size and double pose error. Its results use normalized raw-frame coordinates. This first step draws marker boxes only; it does not yet move the utensil tip/handle zones or emit utensil contacts. Shared engine and vision interfaces are unchanged.
+### Calibrate the tongs
+
+Calibrate each face separately: the two outlines are mirror images.
+
+1. Lay the tongs flat and closed with ID 11 face up, in view, and click **Calibrate ID 11**. The tag's current outline is frozen (dashed yellow), so keep the tongs still while you draw.
+2. Outline the tips. Pad the outline past the jaws, because the lower jaw shifts in the image when the tongs open.
+3. Outline the handle, leaving a gap over the hinge.
+4. Click the jaw end (one or two points) and press **Enter**.
+5. Flip the tongs and repeat with **Calibrate ID 12**.
+
+Models are stored in marker-local coordinates under `ghosttrace.utensils.v2` and take effect immediately. **Clear calibration** returns the tongs to their fixed zones.
+
+### Tracking
+
+Once a face is calibrated, the tip and handle zones follow whichever calibrated tag is visible (the larger one if both are; the two are never averaged). **Tong tracking** shows the state:
+
+- **Tracked:** a calibrated tag is visible this frame.
+- **Held (last pose):** no tag for up to 500 ms, so the last pose is reused. Contacts still fire, but these frames don't count toward confidence.
+- **Tong tracking lost — contacts not recorded:** no tag for longer than that. No contact of any kind involves the tongs.
+- **Tongs: fixed position:** nothing is calibrated, so the static tip and handle zones are used and there are no tool contacts.
+
+Tool contacts fire when a jaw end (white dot) comes within 0.6 tag widths (about 15 mm with a 25 mm tag) of the peanut or meal zone, or when the handle outline does. They use the same 400 ms dwell, exit and re-fire rules as hand contacts. The log shows them as, for example, **Tong tips → Peanut source** with the percentage of tracked frames.
+
+`src/vision/aruco.ts` wraps [js-aruco2](https://github.com/damianofalcioni/js-aruco2). `startVision` detects tags on the same frame as the hands, at the camera's native resolution, because downscaling the 720p feed would halve tag size and double pose error. `src/vision/pose.ts` holds the homography, calibration and pose math, and `src/vision/tracker.ts` holds the tracking states and tool contacts.
 
 ## Integrate with the engine
 
-`src/vision/index.ts` exports `startVision`, compatible with `StartVision` from `src/shared/vision-types.ts`. Supply a playing raw video element, calibrated zones, `onEvent`, and `onStatus`. The handle supports `stop()` and `setZones()`. The UI also emits a `ghosttrace:vision-event` CustomEvent on window for each shared contact/wash event:
+`src/vision/index.ts` exports `startVision`, compatible with `StartVision` from `src/shared/vision-types.ts`. Supply a playing raw video element, calibrated zones, `onEvent`, and `onStatus`, plus `utensilModels` (from `parseUtensilModels` in `src/vision/pose.ts`, reading `ghosttrace.utensils.v2`) for moving tongs. The handle supports `stop()`, `setZones()` and `setUtensilModels()`. `VisionStatus.utensils.tongs` carries the tracking state and the current tip and handle polygons. The UI also emits a `ghosttrace:vision-event` CustomEvent on window for each shared contact/wash event:
 
 ```ts
 window.addEventListener("ghosttrace:vision-event", event => {

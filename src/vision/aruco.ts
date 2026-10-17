@@ -55,86 +55,6 @@ export function recordMarkerFrame(trial: MarkerTrial, markers: DetectedMarker[],
 }
 
 
-const outlines: Record<number, Point[]> = {
-  11: [ // First jaw — rotated 270° clockwise from the original outline
-    [-3.5,  0.6],
-    [-3.5, -0.6],
-    [ 1.0, -0.6],
-    [ 1.0,  0.6],
-  ],
-  12: [ // Second jaw — rotated 270° clockwise from the original outline
-    [-3.5,  0.6],
-    [-3.5, -0.6],
-    [ 1.0, -0.6],
-    [ 1.0,  0.6],
-  ],
-};
-
-// Handle regions follow the jaw tags, extending along each marker's positive X axis.
-const handleOutlines: Record<number, Point[]> = {
-  11: [
-    [0.8,  0.6],
-    [0.8, -0.6],
-    [8.0, -0.6],
-    [8.0,  0.6],
-  ],
-  12: [
-    [0.8,  0.6],
-    [0.8, -0.6],
-    [8.0, -0.6],
-    [8.0,  0.6],
-  ],
-};
-
-function projectOutline(
-  marker: DetectedMarker,
-  outline: Point[],
-): Point[] {
-  const [p0, p1, p2, p3] = marker.corners;
-  if (!p0 || !p1 || !p2 || !p3) return [];
-
-  const dx1 = p1[0] - p2[0];
-  const dx2 = p3[0] - p2[0];
-  const dx3 = p0[0] - p1[0] + p2[0] - p3[0];
-
-  const dy1 = p1[1] - p2[1];
-  const dy2 = p3[1] - p2[1];
-  const dy3 = p0[1] - p1[1] + p2[1] - p3[1];
-
-  let g = 0;
-  let h = 0;
-
-  if (Math.abs(dx3) + Math.abs(dy3) > 1e-10) {
-    const determinant = dx1 * dy2 - dx2 * dy1;
-    if (Math.abs(determinant) < 1e-10) return [];
-
-    g = (dx3 * dy2 - dx2 * dy3) / determinant;
-    h = (dx1 * dy3 - dx3 * dy1) / determinant;
-  }
-
-  const a = p1[0] - p0[0] + g * p1[0];
-  const b = p3[0] - p0[0] + h * p3[0];
-  const d = p1[1] - p0[1] + g * p1[1];
-  const e = p3[1] - p0[1] + h * p3[1];
-
-  const result: Point[] = [];
-
-  for (const [x, y] of outline) {
-    const u = x + 0.5;
-    const v = y + 0.5;
-    const denominator = g * u + h * v + 1;
-
-    if (denominator <= 1e-8) return [];
-
-    result.push([
-      (a * u + b * v + p0[0]) / denominator,
-      (d * u + e * v + p0[1]) / denominator,
-    ]);
-  }
-
-  return result;
-}
-
 export function createMarkerDetector(dictionary: MarkerDictionary = DEFAULT_MARKER_DICTIONARY) {
   const detector = new AR.Detector({ dictionaryName: dictionary, maxHammingDistance: 2 });
   return {
@@ -198,42 +118,29 @@ ${rows}
 </body></html>`;
 }
 
-/** Independent overlay loop: no contact events and no changes to shared vision contracts. */
-export function startMarkerDetection(
-  video: HTMLVideoElement,
-  options: { dictionary: MarkerDictionary; onMarkers: (markers: DetectedMarker[], frame: MarkerFrame) => void; onError: (error: unknown) => void },
-): { stop(): void } {
-  const detector = createMarkerDetector(options.dictionary);
+/**
+ * Detects markers on the video's current frame at its native resolution. Downscaling the 720p feed
+ * would halve tag size (§4.4 needs ≥ 30 px) and double pose error.
+ */
+export function createVideoMarkerDetector(dictionary: MarkerDictionary = DEFAULT_MARKER_DICTIONARY) {
+  const detector = createMarkerDetector(dictionary);
   const sample = document.createElement("canvas");
   const context = sample.getContext("2d", { willReadFrequently: true });
   if (!context) throw new Error("Could not create the marker detection canvas.");
-  let stopped = false;
-  let animation = 0;
-  let lastTime = -1;
-  let lastProcessed = -Infinity;
-  const stop = () => { stopped = true; cancelAnimationFrame(animation); sample.width = 0; sample.height = 0; };
-  const tick = (t: number) => {
-    if (stopped) return;
-    // Run at most 10 times/second without queuing old frames. Sample at the camera's native size:
-    // downscaling 1280×720 to 640 wide halved marker size (§4.4 needs ≥ 30 px) and doubled pose error.
-    if (video.readyState >= 2 && video.videoWidth > 0 && video.currentTime !== lastTime && t - lastProcessed >= 100) {
-      lastTime = video.currentTime; lastProcessed = t;
+  return {
+    detect(video: HTMLVideoElement): { markers: DetectedMarker[]; frame: MarkerFrame } {
+      const begin = performance.now();
       const width = video.videoWidth, height = video.videoHeight;
       if (sample.width !== width || sample.height !== height) { sample.width = width; sample.height = height; }
-      try {
-        const begin = performance.now();
-        context.drawImage(video, 0, 0, width, height);
-        const markers = detector.detect(context.getImageData(0, 0, width, height));
-        options.onMarkers(markers, { width, height, ms: performance.now() - begin });
-      } catch (error) { stop(); options.onError(error); return; }
-    }
-    animation = requestAnimationFrame(tick);
+      context.drawImage(video, 0, 0, width, height);
+      const markers = detector.detect(context.getImageData(0, 0, width, height));
+      return { markers, frame: { width, height, ms: performance.now() - begin } };
+    },
+    close() { sample.width = 0; sample.height = 0; },
   };
-  animation = requestAnimationFrame(tick);
-  return { stop };
 }
 
-/** Draw the rotated marker outline and an upright ID even when the feed is mirrored. */
+/** Draw each tag's outline, its corner 0, and an upright ID even when the feed is mirrored. */
 export function drawMarkerBoxes(
   ctx: CanvasRenderingContext2D, markers: DetectedMarker[], mirrored = false,
 ) {
@@ -246,37 +153,6 @@ export function drawMarkerBoxes(
     ctx.beginPath();
     marker.corners.forEach(([x, y], i) => i === 0 ? ctx.moveTo(x * width, y * height) : ctx.lineTo(x * width, y * height));
     ctx.closePath(); ctx.stroke();
-    const regions = [
-      { outline: outlines[marker.id], stroke: "#fc91ac", fill: "#fc91ac22" },
-      { outline: handleOutlines[marker.id], stroke: "#84b8ff", fill: "#84b8ff22" },
-    ];
-    for (const region of regions) {
-      if (!region.outline) continue;
-      const points = projectOutline(marker, region.outline);
-
-      if (points.length >= 3) {
-        ctx.save();
-
-        ctx.strokeStyle = region.stroke;
-        ctx.fillStyle = region.fill;
-        ctx.lineWidth = 3;
-
-        ctx.beginPath();
-
-        points.forEach(([x, y], index) => {
-          if (index === 0) {
-            ctx.moveTo(x * width, y * height);
-          } else {
-            ctx.lineTo(x * width, y * height);
-          }
-        });
-
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-        ctx.restore();
-      }
-    }
     const first = marker.corners[0]!;
     ctx.fillStyle = "#ffdc70";
     ctx.fillRect(first[0] * width - 4, first[1] * height - 4, 8, 8);

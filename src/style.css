@@ -91,3 +91,4 @@ footer .small-dot { width: 4px; height: 4px; }
 .trial-list { list-style: none; margin: 4px 20px 0; padding: 0; max-height: 150px; overflow-y: auto; }
 .trial-list li { font-size: 10px; color: #c4d0c7; padding: 6px 0; border-bottom: 1px solid #2b352e; font-variant-numeric: tabular-nums; }
 .trial-list li.warn { color: #f8bd72; }
+.status-row span.warn { color: #f8bd72; }

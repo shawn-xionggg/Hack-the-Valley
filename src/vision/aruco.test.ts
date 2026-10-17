@@ -45,6 +45,19 @@ describe("ArUco marker detection", () => {
     expect(markers.map(m => m.id).sort((a, b) => a - b)).toEqual([3, 12]);
   });
 
+  it("orders corners by the tag's own orientation, so marker-local axes turn with the tongs", () => {
+    const upright = frame(), turned = frame();
+    stamp(upright, "ARUCO_4X4_50", 11, 100, 100);
+    stamp(turned, "ARUCO_4X4_50", 11, 100, 100, true); // turned 90° clockwise
+    const [a] = createMarkerDetector().detect(upright);
+    const [b] = createMarkerDetector().detect(turned);
+    // Corner 0 is the tag's top-left: top-left of the box upright, top-right once turned clockwise.
+    expect(a!.corners[0]![0]).toBeCloseTo(100 / 640, 2);
+    expect(a!.corners[0]![1]).toBeCloseTo(100 / 480, 2);
+    expect(b!.corners[0]![0]).toBeCloseTo(208 / 640, 2);
+    expect(b!.corners[0]![1]).toBeCloseTo(100 / 480, 2);
+  });
+
   it("returns no stale boxes after a marker disappears", () => {
     const image = frame();
     stamp(image, "ARUCO_4X4_50", 0, 100, 100);

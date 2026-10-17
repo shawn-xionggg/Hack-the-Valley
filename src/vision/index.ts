@@ -1,7 +1,11 @@
 import { FilesetResolver, HandLandmarker } from "@mediapipe/tasks-vision";
 import type { HandLandmarkerResult } from "@mediapipe/tasks-vision";
+import type { Point, UtensilModels } from "../shared/config";
 import type { VisionHandle, VisionOptions } from "../shared/vision-types";
+import { createVideoMarkerDetector } from "./aruco";
+import type { DetectedMarker, MarkerFrame } from "./aruco";
 import { createTracker } from "./tracker";
+import type { MarkerObservation } from "./tracker";
 
 // Match the WASM runtime to the installed JavaScript package.
 const WASM_ROOT = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22-rc.20250304/wasm";
@@ -10,6 +14,10 @@ const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmark
 export interface LiveVisionOptions extends VisionOptions {
   onResults?: (result: HandLandmarkerResult) => void;
   onError?: (error: unknown) => void;
+  /** Every frame's tag detections (debug overlay, go/no-go trials). Turns detection on even without a tong model. */
+  onMarkers?: (markers: DetectedMarker[], frame: MarkerFrame) => void;
+  /** Jaw ends of the current tong pose, null unless tracked or held (debug overlay). */
+  onJawPoints?: (points: Point[] | null) => void;
 }
 
 /** Call with a playing, unmirrored camera video. Coordinates remain in the raw frame. */
@@ -27,7 +35,10 @@ export async function startVision(options: LiveVisionOptions): Promise<VisionHan
   try { model = await create("GPU"); }
   catch { model = await create("CPU"); }
 
-  const tracker = createTracker(options.zones, options.onEvent, options.tuning);
+  let models: UtensilModels = options.utensilModels ?? {};
+  const tracker = createTracker(options.zones, options.onEvent, options.tuning, models);
+  const markerDetector = createVideoMarkerDetector();
+  let markerErrorLogged = false;
   let stopped = false;
   let animation = 0;
   let lastVideoTime = -1;
@@ -41,6 +52,19 @@ export async function startVision(options: LiveVisionOptions): Promise<VisionHan
     stopped = true;
     cancelAnimationFrame(animation);
     model.close();
+    markerDetector.close();
+  };
+  /** Markers from the same frame as the hands. A failed detection counts as "no marker seen", so tracking goes lost. */
+  const detectMarkers = (): MarkerObservation | undefined => {
+    if (!models.tongs?.markers.length && !options.onMarkers) return undefined;
+    try {
+      const { markers, frame } = markerDetector.detect(options.video);
+      options.onMarkers?.(markers, frame);
+      return { markers, aspect: frame.width / frame.height };
+    } catch (error) {
+      if (!markerErrorLogged) { markerErrorLogged = true; console.error("ArUco detection failed; tong tracking will report lost.", error); }
+      return undefined;
+    }
   };
   const tick = () => {
     if (stopped) return;
@@ -51,15 +75,21 @@ export async function startVision(options: LiveVisionOptions): Promise<VisionHan
       lastProcessed = t;
       try {
         const results = model.detectForVideo(options.video, t);
+        const observation = detectMarkers();
         frames++;
         if (t - fpsStart >= 1000) { fps = Math.round(frames * 1000 / (t - fpsStart)); frames = 0; fpsStart = t; }
         options.onResults?.(results);
-        options.onStatus?.(tracker.update(results.landmarks, t, fps));
+        const status = tracker.update(results.landmarks, t, fps, observation);
+        options.onJawPoints?.(tracker.jawPoints());
+        options.onStatus?.(status);
       } catch (error) { stop(); options.onError?.(error); return; }
     }
     animation = requestAnimationFrame(tick);
   };
   animation = requestAnimationFrame(tick);
-  // Marker tracking isn't built yet (spec v5 §4.6): models are accepted, and the tongs stay "fixed".
-  return { stop, setZones: tracker.setZones, setUtensilModels: () => {} };
+  return {
+    stop,
+    setZones: tracker.setZones,
+    setUtensilModels(next) { models = next; tracker.setUtensilModels(next); },
+  };
 }

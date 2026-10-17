@@ -1,5 +1,16 @@
 import type { Point, Polygon, ZoneLayout, ZonedObjectId } from "../shared/config";
-import { pointInPolygon } from "./tracker";
+
+/** Even-odd ray cast. An empty polygon contains nothing. */
+export function pointInPolygon(point: Point, polygon: Polygon): boolean {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const a = polygon[i]!;
+    const b = polygon[j]!;
+    if ((a[1] > point[1]) !== (b[1] > point[1]) &&
+      point[0] < (b[0] - a[0]) * (point[1] - a[1]) / (b[1] - a[1]) + a[0]) inside = !inside;
+  }
+  return inside;
+}
 
 /** Unsigned shoelace area in normalized frame units (a full frame is 1). Winding order doesn't matter. */
 export function polygonArea(polygon: Polygon): number {
@@ -50,6 +61,30 @@ export function polygonsOverlap(a: Polygon, b: Polygon): boolean {
     }
   }
   return pointInPolygon(a[0]!, b) || pointInPolygon(b[0]!, a);
+}
+
+/**
+ * Distances below are measured in units of frame HEIGHT: x is scaled by the frame's width/height
+ * aspect first, so a normalized 16:9 frame isn't squashed. Inside (or overlapping) counts as 0.
+ */
+function segmentDistance(p: Point, a: Point, b: Point, aspect: number): number {
+  const [px, ax, bx] = [p[0] * aspect, a[0] * aspect, b[0] * aspect];
+  const dx = bx - ax, dy = b[1] - a[1];
+  const length = dx * dx + dy * dy;
+  const s = length ? Math.max(0, Math.min(1, ((px - ax) * dx + (p[1] - a[1]) * dy) / length)) : 0;
+  return Math.hypot(px - ax - s * dx, p[1] - a[1] - s * dy);
+}
+
+export function pointPolygonDistance(point: Point, polygon: Polygon, aspect: number): number {
+  if (polygon.length < 3) return Infinity;
+  if (pointInPolygon(point, polygon)) return 0;
+  return Math.min(...polygon.map((a, i) => segmentDistance(point, a, polygon[(i + 1) % polygon.length]!, aspect)));
+}
+
+export function polygonDistance(a: Polygon, b: Polygon, aspect: number): number {
+  if (a.length < 3 || b.length < 3) return Infinity;
+  if (polygonsOverlap(a, b)) return 0;
+  return Math.min(...a.map(p => pointPolygonDistance(p, b, aspect)), ...b.map(p => pointPolygonDistance(p, a, aspect)));
 }
 
 /** Every pair of calibrated zones that touch or share area. Unset (empty) zones never overlap. */
