@@ -1,6 +1,6 @@
 import { DEFAULT_TUNING } from "../shared/config";
 import type { ContactTarget, Polygon, ToolContactTarget, ToolSurface, Tuning, UtensilModels, ZoneLayout } from "../shared/config";
-import type { ContactEvent, UtensilPoseStatus, VisionStatus, WashEvent } from "../shared/events";
+import type { ContactEvent, UtensilPoseStatus, UtensilWashedEvent, VisionStatus, WashEvent } from "../shared/events";
 import type { DetectedMarker } from "./aruco";
 import { pointInPolygon, pointPolygonDistance } from "./geometry";
 import { poseFromMarkers } from "./pose";
@@ -42,7 +42,7 @@ function tipTouches(pose: UtensilPose, target: Polygon, aspect: number): boolean
 /** Converts normalized landmarks and marker detections into the shared vision events; no exposure state lives here. */
 export function createTracker(
   initialZones: ZoneLayout,
-  onEvent: (event: ContactEvent | WashEvent) => void,
+  onEvent: (event: ContactEvent | WashEvent | UtensilWashedEvent) => void,
   options: Partial<Tuning> = {},
   initialModels: UtensilModels = {},
 ) {
@@ -50,11 +50,20 @@ export function createTracker(
   let zones = initialZones;
   let models = initialModels;
   const dwells = new Map<string, Dwell>();
-  let wash: { entered: number; lastInside: number; fired: boolean } | undefined;
+  /** Hand dwell for one sink visit. `utensilFired`: the wash + utensil-washed pair went out this visit. */
+  let wash: { entered: number; lastInside: number; fired: boolean; utensilFired: boolean } | undefined;
+  /**
+   * A3 tong dwell, alive only inside a hand dwell. `lastPosed` is the last tracked or held frame, so only
+   * lost frames count toward the utensilWashGapMs gap.
+   */
+  let utensilWash: { entered: number; lastPosed: number } | undefined;
   let previousTime: number | undefined;
   /** Last pose from a seen marker; reused while "held", dropped once "lost". */
   let pose: UtensilPose | undefined;
   let lastSeenT: number | null = null;
+
+  /** Whenever the hand dwell resets, the tong dwell resets with it (§4.4). */
+  function resetWash() { wash = undefined; utensilWash = undefined; }
 
   /** Advances one pair's dwell. `counted` frames make up confidence; held-pose frames for tools don't. */
   function step(pair: Pair, inside: boolean, counted: boolean, t: number) {
@@ -102,11 +111,11 @@ export function createTracker(
   }
 
   return {
-    setZones(next: ZoneLayout) { zones = next; dwells.clear(); wash = undefined; },
-    setUtensilModels(next: UtensilModels) { models = next; pose = undefined; lastSeenT = null; dwells.clear(); },
+    setZones(next: ZoneLayout) { zones = next; dwells.clear(); resetWash(); },
+    setUtensilModels(next: UtensilModels) { models = next; pose = undefined; lastSeenT = null; dwells.clear(); utensilWash = undefined; },
     update(hands: Landmark[][], t: number, fps: number, observation?: MarkerObservation): VisionStatus {
       // Never count an unobserved camera stall as continuous contact or washing.
-      if (previousTime !== undefined && t - previousTime > 500) { dwells.clear(); wash = undefined; }
+      if (previousTime !== undefined && t - previousTime > 500) { dwells.clear(); resetWash(); }
       previousTime = t;
       const tongs = trackUtensil(observation, t);
       // While lost, the tongs have no polygons at all, so no contact of any kind involves them.
@@ -131,12 +140,35 @@ export function createTracker(
         step({ a: "tongs-tip", b }, inside, tongs.tracking === "tracked", t);
       }
 
-      const inWash = hands.some(hand => hand.some(p => pointInPolygon([p.x, p.y], zones["wash-station"])));
-      if (wash && !inWash && t - wash.lastInside >= 500) wash = undefined;
+      const sink = zones["wash-station"];
+      const inWash = hands.some(hand => hand.some(p => pointInPolygon([p.x, p.y], sink)));
+      if (wash && !inWash && t - wash.lastInside >= 500) resetWash();
       if (inWash) {
-        wash ??= { entered: t, lastInside: t, fired: false };
+        wash ??= { entered: t, lastInside: t, fired: false, utensilFired: false };
         wash.lastInside = t;
-        if (!wash.fired && t - wash.entered >= tuning.washDwellMs) {
+      }
+
+      // A3 tong dwell. Plain containment, not the grown tool-contact zone: a clearing event stays conservative.
+      // Lost frames can only bridge a gap; it starts and fires on tracked frames (invariant 9: no invented pose).
+      if (!wash || tongs.tracking === "fixed") utensilWash = undefined;
+      else if (tongs.tracking === "lost") {
+        if (utensilWash && t - utensilWash.lastPosed > tuning.utensilWashGapMs) utensilWash = undefined;
+      } else if (!current?.tipContactPoints.some(p => pointInPolygon(p, sink))) utensilWash = undefined;
+      else {
+        // No restart after the pair fired: it can't fire again this visit, so its progress would mislead.
+        if (tongs.tracking === "tracked" && !wash.utensilFired) utensilWash ??= { entered: t, lastPosed: t };
+        if (utensilWash) utensilWash.lastPosed = t;
+      }
+
+      if (wash && inWash) {
+        // Once per visit. The pair still fires after a hands-only wash, and replaces it when both are due.
+        if (!wash.utensilFired && utensilWash && tongs.tracking === "tracked" && t - utensilWash.entered >= tuning.washDwellMs) {
+          wash.fired = wash.utensilFired = true;
+          onEvent({ id: crypto.randomUUID(), t, kind: "wash", method: "zone-dwell",
+            durationMs: t - wash.entered, source: "camera", verified: false });
+          onEvent({ id: crypto.randomUUID(), t, kind: "utensil-washed", utensilId: "tongs", method: "zone-dwell",
+            durationMs: t - utensilWash.entered, source: "camera", verified: false });
+        } else if (!wash.fired && t - wash.entered >= tuning.washDwellMs) {
           wash.fired = true;
           onEvent({ id: crypto.randomUUID(), t, kind: "wash", method: "zone-dwell",
             durationMs: t - wash.entered, source: "camera", verified: false });
@@ -144,7 +176,7 @@ export function createTracker(
       }
       return { t, handsVisible: hands.length, activeZones, fps,
         washProgress: wash ? Math.min(1, (t - wash.entered) / tuning.washDwellMs) : 0,
-        utensilWashProgress: 0, // A3: the tong dwell isn't built yet (§4.7 step 7)
+        utensilWashProgress: utensilWash ? Math.min(1, (t - utensilWash.entered) / tuning.washDwellMs) : 0,
         activeToolContacts, utensils: { tongs } };
     },
     /** Jaw ends of the current pose, for the debug overlay. Null unless tracked or held. */

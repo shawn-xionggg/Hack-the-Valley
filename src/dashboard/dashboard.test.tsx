@@ -1,13 +1,15 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createEngine } from "../engine";
-import type { EngineState } from "../shared/engine-types";
-import type { UtensilTracking } from "../shared/events";
-import { DEMO_SCRIPT, MOVING_TONGS_SCRIPT, alertId } from "../sim/fixtures";
+import type { ExposableSurfaceId } from "../shared/config";
+import type { EngineState, SurfaceStatus } from "../shared/engine-types";
+import type { UtensilTracking, UtensilWashedEvent } from "../shared/events";
+import { DEMO_SCRIPT, MOVING_TONGS_SCRIPT, SCENARIOS, alertId } from "../sim/fixtures";
 import type { Scenario } from "../sim/fixtures";
 import { App } from "./App";
 import { AlertPanel } from "./components/AlertPanel";
 import { SurfaceCards } from "./components/SurfaceCards";
+import { VisionStrip } from "./components/VisionStrip";
 import * as labels from "./labels";
 import { createSimulator } from "./simulation";
 
@@ -21,6 +23,23 @@ const run = (scenario: Scenario): EngineState => {
   for (const event of scenario.events) engine.dispatch(event);
   return engine.getState();
 };
+
+/**
+ * A3 states built by hand, so these tests don't depend on the engine's utensil-washed handling (built in
+ * parallel): the engine's state for the events, with the scenario's expected final statuses and the last
+ * utensil wash filled in. Once the engine handles the event this changes nothing.
+ */
+const a3State = (scenario: Scenario): EngineState => {
+  const state = run(scenario);
+  const surfaces = { ...state.surfaces };
+  for (const [id, status] of Object.entries(scenario.final.statuses ?? {}) as [ExposableSurfaceId, SurfaceStatus][]) {
+    surfaces[id] = { ...surfaces[id], status };
+  }
+  const wash = scenario.events.filter((event): event is UtensilWashedEvent => event.kind === "utensil-washed").pop();
+  const lastUtensilWash = wash ? { eventId: wash.id, utensilId: wash.utensilId, method: wash.method, t: wash.t } : null;
+  return { ...state, surfaces, lastUtensilWash };
+};
+const A3_SCENARIOS = SCENARIOS.filter(scenario => /^1[5-7]\./.test(scenario.name));
 
 const render = (state: EngineState, tracking: UtensilTracking | null = null) => renderToStaticMarkup(
   <>
@@ -54,6 +73,12 @@ describe("dashboard wording (spec §3.3)", () => {
     for (const scenario of [DEMO_SCRIPT, MOVING_TONGS_SCRIPT]) {
       for (const tracking of [null, "tracked", "lost", "fixed"] as const) {
         expect(forbiddenWords(render(run(scenario), tracking))).toEqual([]);
+      }
+    }
+    expect(A3_SCENARIOS).toHaveLength(3);
+    for (const scenario of A3_SCENARIOS) {
+      for (const tracking of [null, "tracked", "lost", "fixed"] as const) {
+        expect(forbiddenWords(render(a3State(scenario), tracking))).toEqual([]);
       }
     }
   });
@@ -102,6 +127,50 @@ describe("dashboard rendering", () => {
     const replaced = run({ ...DEMO_SCRIPT, events: [...DEMO_SCRIPT.events,
       { id: "r1", t: 99_000, kind: "utensil-replaced-confirmed", utensilId: "tongs", source: "manual" }] });
     expect(render(replaced)).not.toContain(labels.TONGS_REPLACE_BUTTON);
+  });
+
+  it("shows the utensil wash on both tong cards once there is one, and not before (A3)", () => {
+    expect(labels.UTENSIL_WASH_LABEL).toBe("Tongs washed (detected, not verified)");
+    const label = /Tongs washed \(detected, not verified\) · zone dwell · /g;
+    for (const scenario of A3_SCENARIOS) {
+      const before = { ...scenario, events: scenario.events.slice(0, scenario.events.findIndex(e => e.kind === "utensil-washed")) };
+      expect(render(a3State(before))).not.toContain(labels.UTENSIL_WASH_LABEL);
+      for (const tracking of [null, "tracked", "lost", "fixed"] as const) {
+        const html = render(a3State(scenario), tracking);
+        expect(html.match(label)).toHaveLength(2);
+        if (tracking === "lost") expect(html.match(/Tong tracking lost — contacts not recorded/g)).toHaveLength(2);
+        if (tracking === "fixed") expect(html.match(/Tongs: fixed position/g)).toHaveLength(2);
+      }
+    }
+    expect(render(run(DEMO_SCRIPT))).not.toContain(labels.UTENSIL_WASH_LABEL); // Act 1's hand wash isn't a utensil wash
+  });
+
+  it("offers the tong reset after a utensil wash only while the tongs are exposed again (A3)", () => {
+    const [cleared, rewashed, mealHeld] = A3_SCENARIOS.map(a3State) as [EngineState, EngineState, EngineState];
+    expect(render(cleared)).not.toContain(labels.TONGS_REPLACE_BUTTON); // 15: hands, tip and handle all reset
+    expect(render(rewashed)).toContain(labels.TONGS_REPLACE_PROMPT); // 16: the unwashed hands re-exposed the tips
+    expect(render(mealHeld)).not.toContain(labels.TONGS_REPLACE_BUTTON); // 17: the meal stays held, the tongs don't
+    expect(render(mealHeld)).toContain("Action required — hold meal");
+    expect(labels.TONGS_REPLACE_PROMPT).toMatch(/sink/);
+  });
+
+  it("shows the tong dwell beside the hand ring only while the tongs are in the sink (A3)", () => {
+    const frame = (washProgress: number, utensilWashProgress: number) => ({
+      fingertips: [], jawPoints: null,
+      status: { t: 0, handsVisible: 2, activeZones: [], washProgress, utensilWashProgress, fps: 20, activeToolContacts: [],
+        utensils: { tongs: { tracking: "tracked" as const, parts: null, lastSeenT: 0 } } },
+    });
+    const strip = (washProgress: number, utensilWashProgress: number) =>
+      renderToStaticMarkup(<VisionStrip frame={frame(washProgress, utensilWashProgress)} lastWash={null} />);
+    expect(strip(0.5, 0)).not.toContain(labels.UTENSIL_WASH_ARIA);
+    expect(strip(0.5, 0)).toContain(labels.SINK_PROMPTS.hands);
+    const both = strip(0.5, 0.4);
+    expect(both).toContain(labels.UTENSIL_WASH_ARIA);
+    expect(both).toContain('aria-valuenow="40"');
+    expect(both).toContain(labels.SINK_PROMPTS.utensil);
+    expect(both).not.toMatch(/wash station/i);
+    expect(forbiddenWords(both)).toEqual([]);
+    expect(renderToStaticMarkup(<VisionStrip frame={null} lastWash={null} />)).toContain(labels.SINK_PROMPTS.off);
   });
 
   it("offers acknowledgement until the alert is acknowledged", () => {

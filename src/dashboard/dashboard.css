@@ -77,6 +77,13 @@ select { background: var(--bg); color: var(--text); border: 1px solid var(--bord
 .wash-ring .track { stroke: #2a333e; }
 .wash-ring .fill { stroke: var(--wash); stroke-linecap: round; transition: stroke-dashoffset .1s linear; }
 .wash-ring span { position: absolute; inset: 0; display: grid; place-items: center; font: 600 16px 'Space Grotesk', sans-serif; }
+/* A3: the tong ring sits beside the hand ring while both are in the sink; accent ties it to the jaw-end dots. */
+.wash-rings { display: flex; align-items: center; gap: 12px; }
+.utensil-ring { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.utensil-ring figcaption { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); }
+.wash-ring.small { width: 52px; height: 52px; }
+.wash-ring.small .fill { stroke: var(--accent); }
+.wash-ring.small span { font-size: 12px; }
 .wash-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .wash-text strong { font-size: 15px; }
 .readout-label, .readouts dt { font-size: 11px; letter-spacing: 1.1px; text-transform: uppercase; color: var(--muted); }

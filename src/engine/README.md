@@ -82,8 +82,9 @@ tests. Shared types, registry IDs, and chain reconstruction remain unchanged.
 `createEngine({ orders?, tuning? })` in `engine.ts` implements the shared `Engine`
 API on top of the registry, `applyContact` and `buildExposureChain`. `dispatch`
 checks duplicate IDs across every event kind first, then applies spec §3.5:
-contacts (through `applyContact`), washes (hands only), utensil replacement (tip
-and handle together), acknowledgements (alert only), and session reset (fresh
+contacts (through `applyContact`), washes (hands only), utensil replacement and
+A3 utensil washes (tip and handle together; a utensil wash also sets
+`lastUtensilWash` and is never a chain step), acknowledgements (alert only), and session reset (fresh
 registry, new deterministic session ID `session-N`). After each applied contact it
 raises at most one `alert:<mealId>:<allergen>` per meal and allergen; the alert
 chain is the recorded ancestry plus every wash that cleared a record on that path,
@@ -92,5 +93,5 @@ after every event, so a meal with an alert stays `action-required` until reset.
 
 Every dispatch returns a new state object and notifies subscribers. It never
 throws: malformed events are logged as `no-change` or skipped, and a failing
-listener is reported to the console. `engine.test.ts` runs all fifteen
+listener is reported to the console. `engine.test.ts` runs all 18
 `SCENARIOS` from `src/sim/fixtures.ts`, including per-step statuses and chains.

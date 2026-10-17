@@ -34,8 +34,22 @@ export const WASH_METHODS: Record<WashMethod, string> = {
 };
 
 export const WASH_LABEL = "Hands washed (detected, not verified)";
-/** A3: shown for a utensil wash at the sink. */
+/** A3: shown for a utensil wash at the sink, on the tip and handle cards. */
 export const UTENSIL_WASH_LABEL = "Tongs washed (detected, not verified)";
+
+/** A3: the wash zone is a marked sink (overlay label and status strip heading). */
+export const SINK_LABEL = "Sink";
+/** Status strip headline, by what the sink dwell is doing. A utensil dwell only runs inside a hand dwell (§4.4). */
+export const SINK_PROMPTS = {
+  utensil: "Hold hands and tongs in the sink…",
+  hands: "Hold hands in the sink…",
+  idle: "Waiting for hands",
+  off: "Camera off",
+} as const;
+export const NO_WASH_NOTE = "No wash this session";
+export const UTENSIL_PROGRESS_CAPTION = "Tongs";
+export const HAND_WASH_ARIA = "Hand wash dwell at the sink";
+export const UTENSIL_WASH_ARIA = "Tong wash dwell at the sink";
 
 /** Badges on the tip and handle cards. Tracked and held need none: the cards' statuses are live. */
 export const TRACKING_NOTES: Partial<Record<UtensilTracking, string>> = {
@@ -62,8 +76,10 @@ export const EFFECT_LABELS: Record<LogEffect, string> = {
   "ignored-invalid-contact": "ignored · invalid pair",
 };
 
-/** Shown under the cards only while a tong part has tracked exposure: replacement is the only tong reset (§3.2). */
-export const TONGS_REPLACE_PROMPT = "The tongs have tracked exposure. Swap them for a fresh pair, then confirm.";
+/** Shown under the cards only while a tong part has tracked exposure. Two resets exist since A3: a sink wash
+ *  together with the hands (camera, no button) or a confirmed replacement (§3.2 rule 3). */
+export const TONGS_REPLACE_PROMPT =
+  "The tongs have tracked exposure. Wash them at the sink together with your hands, or swap for a fresh pair and confirm.";
 export const TONGS_REPLACE_BUTTON = "Confirm tongs replaced";
 export const MANUAL_WASH_BUTTON = "Confirm hands washed with soap and water";
 export const MANUAL_WASH_NOTE = "Fallback for when camera wash detection isn't reliable (spec §4.5).";
@@ -77,6 +93,10 @@ const isTool = (id: ExposableSurfaceId): id is ToolSurface => id === "tongs-tip"
 
 export function washText(method: WashMethod): string {
   return `${WASH_LABEL} · ${WASH_METHODS[method]}`;
+}
+
+export function utensilWashText(method: WashMethod): string {
+  return `${UTENSIL_WASH_LABEL} · ${WASH_METHODS[method]}`;
 }
 
 /** One line per chain step. A tool contact never involves the hands (§2), so it reads as the tool touching the target. */
@@ -100,7 +120,7 @@ export function eventText({ event }: LoggedEvent): string {
     case "wash":
       return washText(event.method);
     case "utensil-washed":
-      return `${UTENSIL_WASH_LABEL} · ${WASH_METHODS[event.method]}`;
+      return utensilWashText(event.method);
     case "utensil-replaced-confirmed":
       return "Tongs replaced (confirmed by staff)";
     case "alert-acknowledged":
