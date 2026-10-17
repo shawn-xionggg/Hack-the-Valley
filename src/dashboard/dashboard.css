@@ -117,6 +117,17 @@ select { background: var(--bg); color: var(--text); border: 1px solid var(--bord
 .alert-action { font-size: 14px; font-weight: 600; color: #ffd6d6; margin: 6px 0 12px; }
 .alert-ack { font-size: 13px; color: #d9c2c2; margin: 0; }
 
+.sim-banner .banner-button { margin-left: 14px; padding: 5px 12px; font-size: 13px; }
+
+.tong-action { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 12px; padding: 12px 14px; border: 1px solid var(--amber-border); border-radius: 10px; background: var(--amber-bg); font-size: 14px; color: #f3d6a6; }
+
+/* Collapsible panels (operator controls, event log): the summary is the panel heading with a caret. */
+details.panel > summary { list-style: none; cursor: pointer; }
+details.panel > summary::-webkit-details-marker { display: none; }
+details.panel > summary h2::before { content: "▸"; display: inline-block; transition: transform .15s; }
+details.panel[open] > summary h2::before { transform: rotate(90deg); }
+details.panel:not([open]) > summary h2 { margin-bottom: 0; }
+
 .controls { display: flex; flex-wrap: wrap; gap: 10px; }
 .scope-note { font-size: 12.5px; line-height: 1.5; color: var(--muted); margin: 18px 0 0; }
 

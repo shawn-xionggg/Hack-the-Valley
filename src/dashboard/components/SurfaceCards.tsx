@@ -1,7 +1,10 @@
 import type { ExposableSurfaceId } from "../../shared/config";
 import type { EngineState } from "../../shared/engine-types";
 import type { UtensilTracking } from "../../shared/events";
-import { SOURCE_LABEL, STATUS_LABELS, SURFACE_LABELS, SURFACE_ORDER, TRACKING_NOTES, WASH_LABEL, WASH_METHODS, clockTime } from "../labels";
+import {
+  SOURCE_LABEL, STATUS_LABELS, SURFACE_LABELS, SURFACE_ORDER, TONGS_REPLACE_BUTTON, TONGS_REPLACE_PROMPT, TRACKING_NOTES,
+  WASH_LABEL, WASH_METHODS, clockTime,
+} from "../labels";
 
 interface Props {
   state: EngineState;
@@ -11,11 +14,22 @@ interface Props {
 
 const isTool = (id: ExposableSurfaceId) => id === "tongs-tip" || id === "tongs-handle";
 
-export function SurfaceCards({ state, tracking }: Props) {
+export function SurfaceCards({ state, tracking, onReplaceTongs }: Props & { onReplaceTongs(): void }) {
+  const tongsExposed = state.surfaces["tongs-tip"].status !== "no-tracked-exposure"
+    || state.surfaces["tongs-handle"].status !== "no-tracked-exposure";
   return (
-    <div className="surface-grid">
-      {SURFACE_ORDER.map(id => <SurfaceCard key={id} id={id} state={state} tracking={tracking} />)}
-    </div>
+    <>
+      <div className="surface-grid">
+        {SURFACE_ORDER.map(id => <SurfaceCard key={id} id={id} state={state} tracking={tracking} />)}
+      </div>
+      {/* The corrective action sits where it's needed, and only while there is something to correct. */}
+      {tongsExposed && (
+        <div className="tong-action">
+          <span>{TONGS_REPLACE_PROMPT}</span>
+          <button className="button" onClick={onReplaceTongs}>{TONGS_REPLACE_BUTTON}</button>
+        </div>
+      )}
+    </>
   );
 }
 

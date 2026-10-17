@@ -60,7 +60,13 @@ export const EFFECT_LABELS: Record<LogEffect, string> = {
   "ignored-invalid-contact": "ignored · invalid pair",
 };
 
-export const CORRECTIVE_ACTION = "Hold this meal and prepare a replacement with appropriate allergen controls.";
+/** Shown under the cards only while a tong part has tracked exposure: replacement is the only tong reset (§3.2). */
+export const TONGS_REPLACE_PROMPT = "The tongs have tracked exposure. Swap them for a fresh pair, then confirm.";
+export const TONGS_REPLACE_BUTTON = "Confirm tongs replaced";
+export const MANUAL_WASH_BUTTON = "Confirm hands washed with soap and water";
+export const MANUAL_WASH_NOTE = "Fallback for when camera wash detection isn't reliable (spec §4.5).";
+
+export const CORRECTIVE_ACTION ="Hold this meal and prepare a replacement with appropriate allergen controls.";
 export const ACK_NOTE = "Acknowledged. The meal stays on hold until the session is reset.";
 export const SCOPE_NOTE =
   "Exposure is inferred from 2D camera geometry. GhostTrace does not test for allergens and does not confirm cleaning.";
