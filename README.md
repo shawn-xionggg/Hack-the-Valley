@@ -25,9 +25,15 @@ Open the localhost URL printed by Vite, click **Start camera**, and allow camera
 
 Start the camera with **ArUco boxes** enabled. Yellow quadrilaterals and IDs follow visible tags. The default dictionary is OpenCV **DICT_4X4_50**; **MIP 36h12** and **ArUco original** are also selectable. The selected dictionary must match the printed tag.
 
-Click **Download test marker #0**, then print the SVG or show it on another screen. Keep its white margin visible and present it flat to the camera. Multiple markers and rotated tags are supported. Labels stay readable when mirroring the feed. Boxes clear when tags disappear or the camera stops.
+Click **Print tong markers 11 + 12** to open a print sheet with the tong tags (spec §4.4) at 25 mm and 30 mm black-square size. Print it at 100% scale, then check that its scale bar measures 50 mm before cutting. **Download test marker #0** downloads a quick test tag in the selected dictionary; print it or show it on another screen. Keep the white margin visible and present the tag flat to the camera. Multiple markers and rotated tags are supported. Labels stay readable when mirroring the feed. Boxes clear when tags disappear or the camera stops.
 
-`src/vision/aruco.ts` runs a separate local detector at up to 10 FPS and 640 px sampling width using [js-aruco2](https://github.com/damianofalcioni/js-aruco2). Its results use normalized raw-frame coordinates. This first step draws marker boxes only; it does not yet move the utensil tip/handle zones or emit utensil contacts. Shared engine and vision interfaces are unchanged.
+The **Tong markers** panel shows each visible tag's side length in pixels, flagged with ⚠ below the 30 px minimum. It also shows the detection frame size and the time each detection takes.
+
+### Night-one go/no-go (spec §4.6)
+
+Mount both markers. Press **T** (or **Start trial**) as the dip starts, and press it again after the serve. Do 10 trials, 5 with each face up. Each trial records how many sampled frames showed ID 11 or 12, which faces were seen, and the smallest tag size. A trial passes at 80%, and the summary shows trials passed and the overall frame rate.
+
+`src/vision/aruco.ts` runs a separate local detector at up to 10 FPS on the camera's native resolution, using [js-aruco2](https://github.com/damianofalcioni/js-aruco2). Downscaling the 720p feed would halve marker size and double pose error. Its results use normalized raw-frame coordinates. This first step draws marker boxes only; it does not yet move the utensil tip/handle zones or emit utensil contacts. Shared engine and vision interfaces are unchanged.
 
 ## Integrate with the engine
 

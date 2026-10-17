@@ -7,8 +7,11 @@ import type { HandLandmarkerResult } from "@mediapipe/tasks-vision";
 import { startVision } from "./vision";
 import { overlappingZones, validatePolygon } from "./vision/geometry";
 import { fixedUtensilStatus } from "./vision/tracker";
-import { createMarkerSvg, drawMarkerBoxes, startMarkerDetection } from "./vision/aruco";
-import type { DetectedMarker, MarkerDictionary } from "./vision/aruco";
+import {
+  GO_NO_GO_RATE, MIN_MARKER_SIDE_PX, TONG_MARKER_IDS, createMarkerSvg, createMarkerTrial, createTongMarkerSheet,
+  drawMarkerBoxes, markerSidePx, recordMarkerFrame, startMarkerDetection,
+} from "./vision/aruco";
+import type { DetectedMarker, MarkerDictionary, MarkerTrial } from "./vision/aruco";
 
 const zoneIds: ZonedObjectId[] = ["peanut-source", "tongs-tip", "tongs-handle", "meal-1", "wash-station"];
 const colors = ["#f8bd72", "#baabff", "#84b8ff", "#fc91ac", "#79ddc1"];
@@ -53,12 +56,18 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
           <div class="status-row"><span>Model</span><span id="model-state">Not loaded</span></div>
           <div class="status-row"><span>Landmarks</span><span id="landmarks">0 points</span></div>
           <div class="status-row"><span>Active zones</span><span id="active">None</span></div>
-          <div class="status-row"><label class="check"><input type="checkbox" id="marker-enabled" checked /> ArUco boxes</label><span id="marker-status" role="status">Camera offline</span></div>
-          <div class="status-row"><label for="marker-dictionary">Marker dictionary</label><select id="marker-dictionary" aria-describedby="marker-help"><option value="ARUCO_4X4_50">4×4 / 50 (OpenCV)</option><option value="ARUCO_MIP_36h12">MIP 36h12</option><option value="ARUCO">ArUco original</option></select></div>
-          <div class="zone-actions"><button class="text-button" id="download-marker">Download test marker #0</button></div>
-          <p class="hint" id="marker-help">Use a marker from the selected dictionary. Print the test SVG or display it on another screen, with its white margin visible.</p>
           <div class="wash-label"><label for="wash">Wash zone dwell</label><span id="wash-text">0%</span></div><progress id="wash" max="1" value="0"></progress>
           <p class="hint">Hold a hand in frame to see its landmarks. Up to two hands at a time.</p>
+        </section>
+        <section class="panel markers-panel"><div class="panel-heading"><h2>Tong markers</h2><span class="mono" id="marker-frame">—</span></div>
+          <div class="status-row"><label class="check"><input type="checkbox" id="marker-enabled" checked /> ArUco boxes</label><span id="marker-status" role="status">Camera offline</span></div>
+          <div class="status-row"><label for="marker-dictionary">Marker dictionary</label><select id="marker-dictionary" aria-describedby="marker-help"><option value="ARUCO_4X4_50">4×4 / 50 (OpenCV)</option><option value="ARUCO_MIP_36h12">MIP 36h12</option><option value="ARUCO">ArUco original</option></select></div>
+          <div class="zone-actions"><button class="text-button" id="print-markers">Print tong markers 11 + 12</button><button class="text-button" id="download-marker">Download test marker #0</button></div>
+          <p class="hint" id="marker-help">The tong sheet prints IDs 11 and 12 at 25 mm and 30 mm (4×4 / 50). Print at 100% and check its 50 mm bar. The test marker uses the selected dictionary.</p>
+          <div class="status-row"><span>Go/no-go</span><span id="trial-summary">No trials yet</span></div>
+          <div class="zone-actions"><button class="text-button" id="trial-toggle" disabled>Start trial (T)</button><button class="text-button" id="trial-clear" disabled>Clear trials</button></div>
+          <ol id="trial-list" class="trial-list"></ol>
+          <p class="hint">Press T as the dip starts and again after the serve. Do 10 trials, 5 with each face up. A trial passes at ${GO_NO_GO_RATE * 100}% of frames showing ID 11 or 12.</p>
         </section>
         <section class="panel zones-panel"><div class="panel-heading"><h2>Contact zones</h2><span class="mono" id="zone-count">0 / 5</span></div>
           <p class="hint zone-intro">Select a surface, then click its corners on the camera to outline its area.</p>
@@ -86,6 +95,9 @@ const markerEnabled = el<HTMLInputElement>("marker-enabled");
 const markerDictionary = el<HTMLSelectElement>("marker-dictionary");
 let markerDetection: { stop(): void } | undefined;
 let markers: DetectedMarker[] = [];
+/** The go/no-go trial being recorded, if any, and the finished ones. */
+let trial: MarkerTrial | undefined;
+const trials: MarkerTrial[] = [];
 let stream: MediaStream | undefined;
 let vision: VisionHandle | undefined;
 let generation = 0;
@@ -205,7 +217,9 @@ function stopCamera(text = "Camera stopped. Start it again whenever you’re rea
   running = false;
   vision?.stop(); vision = undefined;
   markerDetection?.stop(); markerDetection = undefined; markers = [];
+  endTrial();
   el("marker-status").textContent = "Camera offline";
+  el("marker-frame").textContent = "—";
   stream?.getTracks().forEach(track => track.stop()); stream = undefined;
   video.srcObject = null;
   lastResults = undefined;
@@ -369,19 +383,27 @@ mirror.addEventListener("change", () => el("feed").classList.toggle("mirrored", 
 mirror.addEventListener("change", draw);
 function restartMarkers() {
   markerDetection?.stop(); markerDetection = undefined; markers = [];
+  endTrial();
   el("marker-status").textContent = !stream ? "Camera offline" : !markerEnabled.checked ? "Disabled" : "Looking for markers…";
   draw();
   if (!stream || !markerEnabled.checked) return;
   try {
     markerDetection = startMarkerDetection(video, {
       dictionary: markerDictionary.value as MarkerDictionary,
-      onMarkers: next => {
+      onMarkers: (next, frame) => {
         markers = next;
-        el("marker-status").textContent = next.length ? `${next.length} visible · IDs ${next.map(m => m.id).join(", ")}` : "No markers visible";
+        // Side length is what decides whether a tag is big enough (§4.4: ≥ 30 px).
+        el("marker-status").textContent = next.length ? next.map(m => {
+          const side = Math.round(markerSidePx(m, frame.width, frame.height));
+          return `${m.id} · ${side} px${side < MIN_MARKER_SIDE_PX ? " ⚠" : ""}`;
+        }).join(", ") : "No markers visible";
+        el("marker-frame").textContent = `${frame.width} × ${frame.height} · ${Math.round(frame.ms)} MS`;
+        if (trial) { recordMarkerFrame(trial, next, frame); renderTrials(); }
         draw();
       },
       onError: error => {
-        markers = []; draw();
+        markers = []; markerDetection = undefined; draw();
+        endTrial();
         el("marker-status").textContent = "Detection error";
         console.error("ArUco detection failed", error);
       },
@@ -390,6 +412,43 @@ function restartMarkers() {
     el("marker-status").textContent = "Detection unavailable";
     console.error("ArUco initialization failed", error);
   }
+  renderTrials();
+}
+
+const percent = (part: number, whole: number) => whole ? Math.round(100 * part / whole) : 0;
+
+function trialRow(t: MarkerTrial, n: number, recording: boolean) {
+  const row = document.createElement("li");
+  const faces = TONG_MARKER_IDS.filter(id => t.framesById[id]).join(" + ") || "none";
+  row.textContent = `${recording ? "● Recording" : `#${n}`} · ${t.detected}/${t.frames} frames (${percent(t.detected, t.frames)}%) · ID ${faces}`
+    + (t.minSidePx === null ? "" : ` · min ${Math.round(t.minSidePx)} px`);
+  row.classList.toggle("warn", !recording && t.detected < GO_NO_GO_RATE * t.frames);
+  return row;
+}
+
+function renderTrials() {
+  const toggle = el<HTMLButtonElement>("trial-toggle");
+  toggle.textContent = trial ? "End trial (T)" : "Start trial (T)";
+  toggle.disabled = !trial && !markerDetection;
+  el<HTMLButtonElement>("trial-clear").disabled = !trials.length || !!trial;
+  el("trial-list").replaceChildren(...[...trials.map((t, i) => trialRow(t, i + 1, false)), ...trial ? [trialRow(trial, 0, true)] : []].reverse());
+  const frames = trials.reduce((sum, t) => sum + t.frames, 0);
+  const detected = trials.reduce((sum, t) => sum + t.detected, 0);
+  const passed = trials.filter(t => t.detected >= GO_NO_GO_RATE * t.frames).length;
+  el("trial-summary").textContent = !trials.length ? "No trials yet"
+    : `${passed}/${trials.length} passed · ${percent(detected, frames)}% of ${frames} frames`;
+}
+
+/** Also refreshes the trial controls, so call it whenever detection starts or stops. */
+function endTrial() {
+  if (trial?.frames) trials.push(trial);
+  trial = undefined;
+  renderTrials();
+}
+
+function toggleTrial() {
+  if (trial) endTrial();
+  else if (markerDetection) { trial = createMarkerTrial(); renderTrials(); }
 }
 markerEnabled.addEventListener("change", restartMarkers);
 markerDictionary.addEventListener("change", restartMarkers);
@@ -398,6 +457,19 @@ el("download-marker").addEventListener("click", () => {
   const url = URL.createObjectURL(new Blob([createMarkerSvg(dictionary)], { type: "image/svg+xml" }));
   const anchor = document.createElement("a"); anchor.href = url; anchor.download = `aruco-${dictionary}-id-0.svg`; anchor.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+el("print-markers").addEventListener("click", () => {
+  const url = URL.createObjectURL(new Blob([createTongMarkerSheet()], { type: "text/html" }));
+  window.open(url, "_blank");
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+});
+el("trial-toggle").addEventListener("click", toggleTrial);
+el("trial-clear").addEventListener("click", () => { trials.length = 0; renderTrials(); });
+window.addEventListener("keydown", event => {
+  if (event.key !== "t" && event.key !== "T") return;
+  if (event.repeat || event.metaKey || event.ctrlKey || event.altKey) return;
+  if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) return;
+  toggleTrial();
 });
 el("clear-events").addEventListener("click", () => {
   events.length = 0; el("events").replaceChildren(); el("event-count").textContent = "0";

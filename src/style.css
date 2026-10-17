@@ -88,3 +88,6 @@ footer .small-dot { width: 4px; height: 4px; }
 @media (min-width: 1450px) { .workspace { grid-template-columns: minmax(0, 1fr) 350px; } }
 @media (max-width: 980px) { .workspace { grid-template-columns: 1fr; } .sidebar { grid-template-columns: 1fr 1fr; } .stage { max-height: 65vh; } }
 @media (max-width: 600px) { .topbar { height: 68px; } main { padding-top: 28px; } .top-note { font-size: 8px; } .version { display: none; } .page-heading { align-items: start; flex-direction: column; gap: 16px; } .sidebar { grid-template-columns: 1fr; } .panel-heading { padding: 15px; } .camera-toolbar { padding: 15px; gap: 9px; } .camera-select { width: 100%; flex-basis: 65%; } .primary { flex: 1; } .events li { gap: 10px; flex-wrap: wrap; } .event-detail { width: 100%; margin-left: 0; } footer { flex-direction: column; align-items: start; gap: 5px; } }
+.trial-list { list-style: none; margin: 4px 20px 0; padding: 0; max-height: 150px; overflow-y: auto; }
+.trial-list li { font-size: 10px; color: #c4d0c7; padding: 6px 0; border-bottom: 1px solid #2b352e; font-variant-numeric: tabular-nums; }
+.trial-list li.warn { color: #f8bd72; }

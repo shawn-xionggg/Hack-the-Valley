@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { AR } from "js-aruco2";
-import { createMarkerDetector, createMarkerSvg } from "./aruco";
+import {
+  createMarkerDetector, createMarkerSvg, createMarkerTrial, createTongMarkerSheet, markerSidePx, recordMarkerFrame,
+} from "./aruco";
 import type { MarkerDictionary } from "./aruco";
 
 function frame() {
@@ -55,5 +57,39 @@ describe("ArUco marker detection", () => {
     expect(createMarkerSvg()).toContain('width="600" height="600"');
     expect(createMarkerSvg()).toContain('fill="white"');
     expect(() => createMarkerSvg("ARUCO_4X4_50", 50)).toThrow();
+  });
+});
+
+describe("tong marker go/no-go helpers", () => {
+  it("measures marker side length in pixels of the detection frame", () => {
+    const image = frame();
+    stamp(image, "ARUCO_4X4_50", 11, 100, 100); // 6 modules × 18 px
+    const [marker] = createMarkerDetector().detect(image);
+    expect(markerSidePx(marker!, image.width, image.height)).toBeGreaterThan(104);
+    expect(markerSidePx(marker!, image.width, image.height)).toBeLessThan(110);
+    // The same normalized corners are half as many pixels in a half-size frame.
+    expect(markerSidePx(marker!, image.width / 2, image.height / 2)).toBeLessThan(55);
+  });
+
+  it("counts frames with either tong marker, ignoring other IDs", () => {
+    const trial = createMarkerTrial();
+    const square = (id: number, side: number) => ({ id, corners: [[0, 0], [side, 0], [side, side], [0, side]] as [number, number][] });
+    recordMarkerFrame(trial, [square(11, 0.05)], { width: 1000, height: 1000 });
+    recordMarkerFrame(trial, [square(0, 0.05)], { width: 1000, height: 1000 });
+    recordMarkerFrame(trial, [], { width: 1000, height: 1000 });
+    recordMarkerFrame(trial, [square(11, 0.04), square(12, 0.03)], { width: 1000, height: 1000 });
+    expect(trial).toEqual({ frames: 4, detected: 2, framesById: { 11: 2, 12: 1 }, minSidePx: 30 });
+  });
+
+  it("prints IDs 11 and 12 at physical size, margin included", () => {
+    const sheet = createTongMarkerSheet();
+    for (const id of [11, 12]) {
+      const svg = new AR.Dictionary("ARUCO_4X4_50").generateSVG(id);
+      expect(sheet).toContain(svg.slice(svg.indexOf("<rect"))); // exact dictionary bits
+    }
+    // 25 mm and 30 mm black squares are 6 of 8 modules: 33.33 mm and 40 mm with the white margin.
+    expect(sheet.match(/width="33\.33mm"/g)).toHaveLength(2);
+    expect(sheet.match(/width="40\.00mm"/g)).toHaveLength(2);
+    expect(sheet).toContain('width="50mm"');
   });
 });
