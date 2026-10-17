@@ -217,7 +217,7 @@ async function startCamera() {
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) throw new Error("Camera access requires localhost or HTTPS. Open the app using the Vite URL.");
     const nextStream = await navigator.mediaDevices.getUserMedia({
       audio: false,
-      video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 },
+      video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 },
         ...(camera.value ? { deviceId: { exact: camera.value } } : { facingMode: "environment" }) },
     });
     if (attempt !== generation) { nextStream.getTracks().forEach(track => track.stop()); return; }
