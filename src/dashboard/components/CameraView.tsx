@@ -3,7 +3,7 @@
 
 import type { Point, Polygon, ZonedObjectId } from "../../shared/config";
 import type { EngineState } from "../../shared/engine-types";
-import { SURFACE_LABELS } from "../labels";
+import { SINK_LABEL, SURFACE_LABELS } from "../labels";
 import type { LiveVision } from "../useLiveVision";
 
 interface Props {
@@ -15,7 +15,7 @@ interface Props {
 }
 
 const ZONE_ORDER: ZonedObjectId[] = ["wash-station", "peanut-source", "meal-1", "tongs-handle", "tongs-tip"];
-const ZONE_NAMES: Record<ZonedObjectId, string> = { ...SURFACE_LABELS, "wash-station": "Wash station" } as Record<ZonedObjectId, string>;
+const ZONE_NAMES: Record<ZonedObjectId, string> = { ...SURFACE_LABELS, "wash-station": SINK_LABEL } as Record<ZonedObjectId, string>;
 
 const centroid = (polygon: Polygon): Point => [
   polygon.reduce((sum, p) => sum + p[0], 0) / polygon.length,

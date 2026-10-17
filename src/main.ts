@@ -55,7 +55,8 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
           <div class="status-row"><span>Model</span><span id="model-state">Not loaded</span></div>
           <div class="status-row"><span>Landmarks</span><span id="landmarks">0 points</span></div>
           <div class="status-row"><span>Active zones</span><span id="active">None</span></div>
-          <div class="wash-label"><label for="wash">Wash zone dwell</label><span id="wash-text">0%</span></div><progress id="wash" max="1" value="0"></progress>
+          <div class="wash-label"><label for="wash">Sink dwell · hands</label><span id="wash-text">0%</span></div><progress id="wash" max="1" value="0"></progress>
+          <div class="wash-label"><label for="utensil-wash">Sink dwell · hands + tong jaws</label><span id="utensil-wash-text">0%</span></div><progress id="utensil-wash" max="1" value="0"></progress>
           <p class="hint">Hold a hand in frame to see its landmarks. Up to two hands at a time.</p>
         </section>
         <section class="panel markers-panel"><div class="panel-heading"><h2>Tong markers</h2><span class="mono" id="marker-frame">—</span></div>
@@ -83,7 +84,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
     <section class="panel events-panel"><div class="panel-heading"><h2>Activity <span id="event-count" class="count">0</span></h2><div><button class="text-button" id="export" disabled>Export JSON</button><button class="text-button" id="clear-events">Clear log</button></div></div>
       <div class="events-empty" id="events-empty">No contacts yet. Calibrate a zone and hold a fingertip inside it for 0.4 seconds.</div><ol id="events" class="events" aria-live="polite" aria-label="Recent contact and wash events"></ol>
     </section>
-    <footer><span><span class="small-dot"></span> Local inference · No video uploads · <a href="./dashboard.html">Open the dashboard</a></span><span>Zone overlap estimates contact. Wash events are unverified.</span></footer>
+    <footer><span><span class="small-dot"></span> Local inference · No video uploads · <a href="./dashboard.html">Open the dashboard</a></span><span>Zone overlap estimates contact. Washes are detected, not verified.</span></footer>
   </main>`;
 
 function el<T extends HTMLElement>(id: string): T { return document.getElementById(id) as T; }
@@ -154,6 +155,27 @@ function tracePolygon(polygon: Polygon, w: number, h: number) {
   ctx.closePath();
 }
 
+/** A text tag above a polygon, drawn unmirrored so it reads; the geometry stays in raw coordinates. */
+function drawZoneLabel(text: string, polygon: Polygon, color: string, w: number, h: number) {
+  ctx.save();
+  ctx.font = "bold 14px sans-serif";
+  const width = ctx.measureText(text).width + 12;
+  const x = Math.max(0, Math.min(w - width, Math.min(...polygon.map(([x]) => (mirror.checked ? 1 - x : x) * w))));
+  const y = Math.max(0, Math.min(...polygon.map(([, y]) => y * h)) - 26);
+  if (mirror.checked) { ctx.translate(w, 0); ctx.scale(-1, 1); }
+  ctx.fillStyle = "#101613"; ctx.fillRect(x, y, width, 22);
+  ctx.fillStyle = color; ctx.fillText(text, x + 6, y + 16);
+  ctx.restore();
+}
+
+/** The sink's name, plus both dwells while they run (A3: hands alone, and hands with the tong jaws). */
+function sinkLabel(): string {
+  const pct = (progress: number) => `${Math.round(progress * 100)}%`;
+  return [SURFACES["wash-station"].label,
+    status?.washProgress ? `hands ${pct(status.washProgress)}` : "",
+    status?.utensilWashProgress ? `tongs ${pct(status.utensilWashProgress)}` : ""].filter(Boolean).join(" · ");
+}
+
 function draftColor(): string {
   if (calibration) return calibration.step === "jaws" ? "#ffffff" : colors[zoneIds.indexOf(calibration.step)]!;
   return colors[zoneIds.indexOf(selectedZone!)] ?? "#ffffff";
@@ -173,6 +195,8 @@ function draw() {
     ctx.lineWidth = selectedZone === id ? 4 : 2;
     ctx.fill(); ctx.stroke();
   });
+  const sink = zonePolygon("wash-station");
+  if (sink.length) drawZoneLabel(sinkLabel(), sink, colors[zoneIds.indexOf("wash-station")]!, w, h);
   lastResults?.landmarks.forEach((hand, index) => {
     ctx.strokeStyle = index === 0 ? "#8cf4c8" : "#c5acff";
     ctx.fillStyle = "#ffffff";
@@ -250,6 +274,8 @@ function updateStatus(next: VisionStatus) {
   ].join(", ") || "None";
   el<HTMLProgressElement>("wash").value = next.washProgress;
   el("wash-text").textContent = `${Math.round(next.washProgress * 100)}%`;
+  el<HTMLProgressElement>("utensil-wash").value = next.utensilWashProgress;
+  el("utensil-wash-text").textContent = `${Math.round(next.utensilWashProgress * 100)}%`;
   el("tong-tracking").textContent = running ? TRACKING_LABELS[next.utensils.tongs.tracking] : "—";
   el("tong-tracking").classList.toggle("warn", running && next.utensils.tongs.tracking === "lost");
   enginePanel.setTracking(running ? next.utensils.tongs.tracking : null);
@@ -264,12 +290,12 @@ function logEvent(event: ContactEvent | WashEvent | UtensilWashedEvent) {
   const label = document.createElement("span");
   label.textContent = event.kind === "contact"
     ? `${event.a === "hands" ? "Hands" : SURFACES[event.a].label} → ${SURFACES[event.b].label}`
-    : event.kind === "wash" ? "Wash zone dwell completed · unverified" : "Tongs washed at the sink · unverified";
+    : event.kind === "wash" ? "Hands washed at the sink (detected, not verified)" : "Tongs washed at the sink (detected, not verified)";
   const detail = document.createElement("span");
   detail.className = "event-detail";
   detail.textContent = event.kind === "contact"
     ? `${Math.round(event.confidence * 100)}% ${event.a === "hands" ? "overlap" : "tracked"} frames`
-    : `${((event.durationMs ?? 0) / 1000).toFixed(1)}s in zone`;
+    : `${((event.durationMs ?? 0) / 1000).toFixed(1)}s in sink${event.kind === "utensil-washed" ? " with the tong jaws" : ""}`;
   row.append(time, label, detail);
   el("events").prepend(row);
   while (el("events").children.length > 30) el("events").lastElementChild?.remove();

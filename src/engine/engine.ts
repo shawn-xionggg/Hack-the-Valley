@@ -1,5 +1,5 @@
 import { DEFAULT_TUNING, ORDERS, UTENSILS } from "../shared/config";
-import type { Order, Tuning } from "../shared/config";
+import type { Order, Tuning, UtensilId } from "../shared/config";
 import type { Alert, ChainStep, CreateEngine, EngineState, LogEffect, SurfaceStatus } from "../shared/engine-types";
 import type { GhostEvent } from "../shared/events";
 import { buildExposureChain } from "./history";
@@ -53,6 +53,19 @@ function raiseAlerts(state: EngineState, event: GhostEvent, orders: Order[]) {
   }
 }
 
+/** Marks every active record on the utensil's surfaces as cleared by `eventId`; true if any was. */
+function clearUtensil(state: EngineState, utensilId: UtensilId, eventId: string): boolean {
+  const parts = new Set<string>(UTENSILS[utensilId] ?? []);
+  let cleared = false;
+  for (const record of state.records) {
+    if (parts.has(record.surfaceId) && record.clearedByEventId === null) {
+      record.clearedByEventId = eventId;
+      cleared = true;
+    }
+  }
+  return cleared;
+}
+
 /** One event → next state. Pure apart from `nextSessionId`, which is deterministic per engine. */
 function reduce(state: EngineState, event: GhostEvent, ctx: Context): EngineState {
   const seen = state.log.some(entry => entry.event.id === event.id);
@@ -74,15 +87,14 @@ function reduce(state: EngineState, event: GhostEvent, ctx: Context): EngineStat
       next.lastWash = { eventId: event.id, method: event.method, t: event.t };
       return deriveSurfaces(log("applied"));
     }
+    case "utensil-washed": {
+      // A3: clears every surface of the utensil, like a replacement; hands, meals and alerts are untouched.
+      clearUtensil(next, event.utensilId, event.id);
+      next.lastUtensilWash = { eventId: event.id, utensilId: event.utensilId, method: event.method, t: event.t };
+      return deriveSurfaces(log("applied"));
+    }
     case "utensil-replaced-confirmed": {
-      const parts = new Set<string>(UTENSILS[event.utensilId] ?? []);
-      let cleared = false;
-      for (const record of next.records) {
-        if (parts.has(record.surfaceId) && record.clearedByEventId === null) {
-          record.clearedByEventId = event.id;
-          cleared = true;
-        }
-      }
+      const cleared = clearUtensil(next, event.utensilId, event.id);
       return deriveSurfaces(log(cleared ? "applied" : "no-change"));
     }
     case "alert-acknowledged": {

@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { Point, Polygon, UtensilMarkerModel, UtensilModels, ZoneLayout } from "../shared/config";
-import type { ContactEvent, WashEvent } from "../shared/events";
+import type { ContactEvent, UtensilWashedEvent, WashEvent } from "../shared/events";
 import type { DetectedMarker } from "./aruco";
 import { TOOL_ZONE_MARGIN, createTracker, pointInPolygon } from "./tracker";
 
 const square: [number, number][] = [[0.1, 0.1], [0.4, 0.1], [0.4, 0.4], [0.1, 0.4]];
 const zones = (): ZoneLayout => ({ "peanut-source": square, "tongs-tip": [], "tongs-handle": [], "meal-1": [], "wash-station": [] });
+type Emitted = ContactEvent | WashEvent | UtensilWashedEvent;
 const hand = Array.from({ length: 21 }, () => ({ x: 0.2, y: 0.2, z: 0 }));
 
 describe("vision event integration", () => {
@@ -16,7 +17,7 @@ describe("vision event integration", () => {
   });
 
   it("emits once per dwell and rearms only after exit", () => {
-    const events: (ContactEvent | WashEvent)[] = [];
+    const events: Emitted[] = [];
     const tracker = createTracker(zones(), event => events.push(event));
     for (let t = 0; t <= 1000; t += 100) tracker.update([hand], t, 10);
     expect(events).toHaveLength(1);
@@ -29,7 +30,7 @@ describe("vision event integration", () => {
   });
 
   it("re-fires every heldContactRefireMs while held, each with a fresh id", () => {
-    const events: (ContactEvent | WashEvent)[] = [];
+    const events: Emitted[] = [];
     const tracker = createTracker(zones(), event => events.push(event));
     for (let t = 0; t <= 2500; t += 100) tracker.update([hand], t, 10);
     expect(events.map(e => e.t)).toEqual([400, 1400, 2400]);
@@ -37,7 +38,7 @@ describe("vision event integration", () => {
   });
 
   it("scores each re-fire on the frames since the previous emission", () => {
-    const events: (ContactEvent | WashEvent)[] = [];
+    const events: Emitted[] = [];
     const tracker = createTracker(zones(), event => events.push(event));
     for (let t = 0; t <= 400; t += 100) tracker.update([hand], t, 10);
     tracker.update([], 500, 10); // brief gaps under contactExitMs keep the dwell alive
@@ -57,7 +58,7 @@ describe("vision event integration", () => {
   });
 
   it("does not count a camera stall as observed dwell", () => {
-    const events: (ContactEvent | WashEvent)[] = [];
+    const events: Emitted[] = [];
     const tracker = createTracker(zones(), event => events.push(event));
     tracker.update([hand], 0, 10);
     tracker.update([hand], 2000, 10);
@@ -65,7 +66,7 @@ describe("vision event integration", () => {
   });
 
   it("clears pending dwell when calibration changes", () => {
-    const events: (ContactEvent | WashEvent)[] = [];
+    const events: Emitted[] = [];
     const tracker = createTracker(zones(), event => events.push(event));
     tracker.update([hand], 0, 10);
     tracker.update([hand], 300, 10);
@@ -75,7 +76,7 @@ describe("vision event integration", () => {
   });
 
   it("resolves overlapping tong zones to a single contact", () => {
-    const events: (ContactEvent | WashEvent)[] = [];
+    const events: Emitted[] = [];
     const tracker = createTracker({ ...zones(), "peanut-source": [], "tongs-tip": square, "tongs-handle": square }, event => events.push(event));
     for (let t = 0; t <= 500; t += 100) tracker.update([hand], t, 10);
     expect(events).toHaveLength(1);
@@ -83,7 +84,7 @@ describe("vision event integration", () => {
   });
 
   it("requires sustained wash dwell and an exit before another wash", () => {
-    const events: (ContactEvent | WashEvent)[] = [];
+    const events: Emitted[] = [];
     const tracker = createTracker({ ...zones(), "peanut-source": [], "wash-station": square }, event => events.push(event));
     for (let t = 0; t <= 7000; t += 100) tracker.update([hand], t, 10);
     expect(events).toHaveLength(1);
@@ -152,7 +153,7 @@ describe("moving tongs", () => {
   });
 
   it("fires tool contacts from the jaw end, with dwell and held re-fire", () => {
-    const events: (ContactEvent | WashEvent)[] = [];
+    const events: Emitted[] = [];
     const tracker = createTracker(table(), event => events.push(event), {}, models());
     let status;
     for (let t = 0; t <= 1500; t += 100) status = tracker.update([], t, 10, seen(tag(11)));
@@ -162,7 +163,7 @@ describe("moving tongs", () => {
   });
 
   it("counts only tracked frames toward confidence, and stops at lost", () => {
-    const events: (ContactEvent | WashEvent)[] = [];
+    const events: Emitted[] = [];
     const tracker = createTracker(table(), event => events.push(event), {}, models());
     tracker.update([], 0, 10, seen(tag(11)));
     tracker.update([], 100, 10, seen(tag(11)));
@@ -177,7 +178,7 @@ describe("moving tongs", () => {
     const aspect = 16 / 9;
     const jawX = 0.5 - 4 * SIDE / aspect; // normalized x of the jaw end
     const fires = (gap: number) => {
-      const events: (ContactEvent | WashEvent)[] = [];
+      const events: Emitted[] = [];
       // Peanut zone starts `gap` frame-heights to the left of the jaw end.
       const left = jawX - gap / aspect;
       const tracker = createTracker({ ...table(), "peanut-source": box(left - 0.1, 0.45, left, 0.55) }, event => events.push(event), {}, models());
@@ -189,7 +190,7 @@ describe("moving tongs", () => {
   });
 
   it("never emits a handle tool contact, even with the handle over the meal (A2)", () => {
-    const events: (ContactEvent | WashEvent)[] = [];
+    const events: Emitted[] = [];
     const tracker = createTracker({ ...table(), "peanut-source": [], "meal-1": box(0.8, 0.4, 0.95, 0.6) }, event => events.push(event), {}, models());
     let status;
     for (let t = 0; t <= 1500; t += 100) status = tracker.update([], t, 10, seen(tag(11)));
@@ -198,7 +199,7 @@ describe("moving tongs", () => {
   });
 
   it("a scoop with the handle over the bowl exposes only the tips (A2)", () => {
-    const events: (ContactEvent | WashEvent)[] = [];
+    const events: Emitted[] = [];
     // The bowl spans the jaw end (x 0.3) and the start of the handle (x 0.55–0.6).
     const tracker = createTracker({ ...table(), "peanut-source": box(0.25, 0.4, 0.6, 0.6) }, event => events.push(event), {}, models());
     let status;
@@ -208,14 +209,14 @@ describe("moving tongs", () => {
   });
 
   it("tests fingertips against the moving parts, not the static tong zones", () => {
-    const events: (ContactEvent | WashEvent)[] = [];
+    const events: Emitted[] = [];
     const tracker = createTracker({ ...table(), "peanut-source": [] }, event => events.push(event), {}, models());
     for (let t = 0; t <= 400; t += 100) tracker.update([handAt(0.4, 0.5), handAt(0.07, 0.07)], t, 10, seen(tag(11)));
     expect(events.filter(e => e.kind === "contact" && e.a === "hands").map(e => e.kind === "contact" && e.b)).toEqual(["tongs-tip"]);
   });
 
   it("records no contact of any kind with the tongs while lost", () => {
-    const events: (ContactEvent | WashEvent)[] = [];
+    const events: Emitted[] = [];
     const tracker = createTracker(table(), event => events.push(event), {}, models());
     tracker.update([], 0, 10, seen(tag(11)));
     for (let t = 100; t <= 600; t += 100) tracker.update([], t, 10, seen());
@@ -245,3 +246,137 @@ describe("moving tongs", () => {
   });
 });
 
+
+// Utensil wash (spec A3 §4.4). The jaw end sits at (0.3, 0.5) with the tag at the centre; the sink spans
+// it, and the washing hand stays in the sink but outside the tip polygon (x ≥ 0.3), so it makes no contacts.
+const SINK = box(0.2, 0.4, 0.36, 0.6);
+const sinkTable = (): ZoneLayout => ({ ...table(), "peanut-source": [], "wash-station": SINK });
+const washingHand = handAt(0.22, 0.42);
+const atRest = () => seen(tag(11, 0.8, 0.2)); // jaw end at (0.6, 0.2), well outside the sink
+const inSink = () => seen(tag(11));
+const washes = (events: Emitted[]) => events.filter(e => e.kind !== "contact").map(e => `${e.kind}@${e.t}`);
+/** Runs frames every 100 ms from `from` to `to` inclusive and returns the last status. */
+function frames(tracker: ReturnType<typeof createTracker>, from: number, to: number,
+  hands: ReturnType<typeof handAt>[], observation: () => ReturnType<typeof seen>) {
+  let status;
+  for (let t = from; t <= to; t += 100) status = tracker.update(hands, t, 10, observation());
+  return status!;
+}
+
+describe("utensil wash (A3)", () => {
+  it("emits wash then utensil-washed back-to-back, with the same t and their own ids", () => {
+    const events: Emitted[] = [];
+    const tracker = createTracker(sinkTable(), event => events.push(event), {}, models());
+    frames(tracker, 0, 6000, [washingHand], inSink);
+    expect(events).toHaveLength(2); // both due on the same frame: only the pair, never two washes
+    expect(events[0]).toMatchObject({ kind: "wash", t: 6000, method: "zone-dwell", durationMs: 6000, source: "camera", verified: false });
+    expect(events[1]).toMatchObject({ kind: "utensil-washed", t: 6000, utensilId: "tongs", method: "zone-dwell",
+      durationMs: 6000, source: "camera", verified: false });
+    expect(events[0]!.id).not.toBe(events[1]!.id);
+  });
+
+  it("fires once per sink visit, and again only after the hands leave", () => {
+    const events: Emitted[] = [];
+    const tracker = createTracker(sinkTable(), event => events.push(event), {}, models());
+    frames(tracker, 0, 13000, [washingHand], inSink);
+    expect(washes(events)).toEqual(["wash@6000", "utensil-washed@6000"]);
+    frames(tracker, 13100, 13600, [], inSink); // hands out for 500 ms: the visit ends
+    frames(tracker, 13700, 19700, [washingHand], inSink);
+    expect(washes(events)).toEqual(["wash@6000", "utensil-washed@6000", "wash@19700", "utensil-washed@19700"]);
+  });
+
+  it("does nothing for tongs left in the sink without hands", () => {
+    const events: Emitted[] = [];
+    const tracker = createTracker(sinkTable(), event => events.push(event), {}, models());
+    expect(frames(tracker, 0, 10000, [], inSink).utensilWashProgress).toBe(0);
+    expect(events).toEqual([]);
+  });
+
+  it("sends a wash only when the tongs stay at the rest spot (Act 1 step 4)", () => {
+    const events: Emitted[] = [];
+    const tracker = createTracker(sinkTable(), event => events.push(event), {}, models());
+    expect(frames(tracker, 0, 5000, [washingHand], atRest).utensilWashProgress).toBe(0);
+    frames(tracker, 5100, 9000, [washingHand], atRest);
+    expect(washes(events)).toEqual(["wash@6000"]);
+  });
+
+  it("bridges lost tracking up to utensilWashGapMs", () => {
+    const events: Emitted[] = [];
+    const tracker = createTracker(sinkTable(), event => events.push(event), {}, models());
+    frames(tracker, 0, 1000, [washingHand], inSink);
+    frames(tracker, 1100, 1500, [washingHand], seen); // held, which never counts as a gap
+    const lost = frames(tracker, 1600, 3000, [washingHand], seen); // lost for 1500 ms after the last held frame
+    expect(lost.utensils.tongs.tracking).toBe("lost");
+    expect(lost.utensilWashProgress).toBeCloseTo(0.5);
+    frames(tracker, 3100, 6000, [washingHand], inSink);
+    expect(washes(events)).toEqual(["wash@6000", "utensil-washed@6000"]);
+    expect(events[1]).toMatchObject({ durationMs: 6000 });
+  });
+
+  it("resets after lost tracking longer than utensilWashGapMs; the hand wash still fires alone", () => {
+    const events: Emitted[] = [];
+    const tracker = createTracker(sinkTable(), event => events.push(event), {}, models());
+    frames(tracker, 0, 1500, [washingHand], inSink);
+    frames(tracker, 1600, 2000, [washingHand], seen); // held
+    expect(frames(tracker, 2100, 3600, [washingHand], seen).utensilWashProgress).toBe(0); // lost 1600 ms
+    frames(tracker, 3700, 10000, [washingHand], inSink); // the tong dwell restarts at 3700
+    expect(washes(events)).toEqual(["wash@6000", "wash@9700", "utensil-washed@9700"]);
+  });
+
+  it("never fires a utensil wash in fixed mode", () => {
+    const events: Emitted[] = [];
+    const layout = { ...sinkTable(), "tongs-tip": SINK }; // even with the static tip zone in the sink
+    const tracker = createTracker(layout, event => events.push(event));
+    const status = frames(tracker, 0, 7000, [washingHand], inSink);
+    expect(status.utensils.tongs.tracking).toBe("fixed");
+    expect(status.utensilWashProgress).toBe(0);
+    expect(washes(events)).toEqual(["wash@6000"]);
+  });
+
+  it("still fires the pair after a hands-only wash earlier in the same visit", () => {
+    const events: Emitted[] = [];
+    const tracker = createTracker(sinkTable(), event => events.push(event), {}, models());
+    frames(tracker, 0, 6000, [washingHand], atRest);
+    expect(washes(events)).toEqual(["wash@6000"]);
+    frames(tracker, 6100, 13000, [washingHand], inSink); // the washed hands bring the tongs in
+    expect(washes(events)).toEqual(["wash@6000", "wash@12100", "utensil-washed@12100"]);
+  });
+
+  it("waits for the hand dwell before starting the tong dwell", () => {
+    const events: Emitted[] = [];
+    const tracker = createTracker(sinkTable(), event => events.push(event), {}, models());
+    frames(tracker, 0, 900, [], inSink);
+    frames(tracker, 1000, 7000, [washingHand], inSink);
+    expect(washes(events)).toEqual(["wash@7000", "utensil-washed@7000"]);
+  });
+
+  it("reports utensilWashProgress only while the tong dwell is alive", () => {
+    const tracker = createTracker(sinkTable(), () => {}, {}, models());
+    frames(tracker, 0, 1000, [washingHand], atRest);
+    const started = frames(tracker, 1100, 4100, [washingHand], inSink);
+    expect(started.washProgress).toBeCloseTo(4100 / 6000);
+    expect(started.utensilWashProgress).toBeCloseTo(0.5);
+    expect(frames(tracker, 4200, 4500, [], inSink).utensilWashProgress).toBeCloseTo(3400 / 6000); // brief hand gap
+    expect(frames(tracker, 4600, 4600, [], inSink).utensilWashProgress).toBe(0); // the hand dwell reset
+  });
+
+  it("resets when every jaw end leaves the sink on a tracked frame", () => {
+    const events: Emitted[] = [];
+    const tracker = createTracker(sinkTable(), event => events.push(event), {}, models());
+    frames(tracker, 0, 3000, [washingHand], inSink);
+    expect(frames(tracker, 3100, 3100, [washingHand], atRest).utensilWashProgress).toBe(0);
+    frames(tracker, 3200, 9200, [washingHand], inSink);
+    expect(washes(events)).toEqual(["wash@6000", "wash@9200", "utensil-washed@9200"]);
+  });
+
+  it("resets with the hand dwell on a camera stall", () => {
+    const events: Emitted[] = [];
+    const tracker = createTracker(sinkTable(), event => events.push(event), {}, models());
+    frames(tracker, 0, 3000, [washingHand], inSink);
+    const after = frames(tracker, 4000, 4000, [washingHand], inSink);
+    expect(after.washProgress).toBe(0);
+    expect(after.utensilWashProgress).toBe(0);
+    frames(tracker, 4100, 10000, [washingHand], inSink);
+    expect(washes(events)).toEqual(["wash@10000", "utensil-washed@10000"]);
+  });
+});

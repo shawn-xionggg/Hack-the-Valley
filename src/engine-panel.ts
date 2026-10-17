@@ -76,7 +76,7 @@ function chime() {
 }
 
 export interface EnginePanel {
-  /** Feed every camera contact/wash here. Ignored while a simulated replay owns the session. */
+  /** Feed every camera contact, wash and utensil wash here. Ignored while a simulated replay owns the session. */
   onVisionEvent(event: ContactEvent | WashEvent | UtensilWashedEvent): void;
   /** Current tong tracking state, or null while the camera is off. */
   setTracking(tracking: UtensilTracking | null): void;
@@ -127,6 +127,11 @@ export function mountEnginePanel(container: HTMLElement): EnginePanel {
     };
     if (id === "hands" && state.lastWash) {
       note(`Hands washed (detected, not verified) · ${WASH_METHODS[state.lastWash.method]} · ${clock(state.lastWash.t)}`);
+    }
+    // A3. Optional chaining: an engine without the utensil-washed case leaves this unset.
+    const utensilWash = state.lastUtensilWash;
+    if (isTool(id) && utensilWash?.utensilId === "tongs") {
+      note(`Tongs washed (detected, not verified) · ${WASH_METHODS[utensilWash.method]} · ${clock(utensilWash.t)}`);
     }
     if (isTool(id) && tracking === "lost") note("Tong tracking lost — contacts not recorded", true);
     if (isTool(id) && tracking === "fixed") note("Tongs: fixed position");

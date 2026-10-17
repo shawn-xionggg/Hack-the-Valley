@@ -3,7 +3,7 @@ import type { EngineState } from "../../shared/engine-types";
 import type { UtensilTracking } from "../../shared/events";
 import {
   SOURCE_LABEL, STATUS_LABELS, SURFACE_LABELS, SURFACE_ORDER, TONGS_REPLACE_BUTTON, TONGS_REPLACE_PROMPT, TRACKING_NOTES,
-  WASH_LABEL, WASH_METHODS, clockTime,
+  WASH_LABEL, WASH_METHODS, clockTime, utensilWashText,
 } from "../labels";
 
 interface Props {
@@ -46,6 +46,12 @@ function SurfaceCard({ id, state, tracking }: Props & { id: ExposableSurfaceId }
       {id === "hands" && state.lastWash && (
         <span className="surface-note wash">
           {WASH_LABEL} · {WASH_METHODS[state.lastWash.method]} · {clockTime(state.lastWash.t)}
+        </span>
+      )}
+      {/* A3: one utensil wash clears tip and handle together, so both cards carry it, like the hand wash on Hands. */}
+      {isTool(id) && state.lastUtensilWash && (
+        <span className="surface-note wash">
+          {`${utensilWashText(state.lastUtensilWash.method)} · ${clockTime(state.lastUtensilWash.t)}`}
         </span>
       )}
       {trackingNote && <span className={`surface-note${tracking === "lost" ? " warn" : ""}`}>{trackingNote}</span>}
