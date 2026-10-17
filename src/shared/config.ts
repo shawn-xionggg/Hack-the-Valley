@@ -90,19 +90,27 @@ export type ContactActor = "hands" | ToolSurface;
 /** Static targets a tracked tool can touch (never another tool part). */
 export type ToolContactTarget = Exclude<ContactTarget, ToolSurface>; // "peanut-source" | "meal-1"
 
+// Amendment A1 (signed off Sat Oct 17): replaces v5's single-marker UtensilModel.
 /**
- * A utensil's parts in MARKER-LOCAL coordinates (marker square = [-0.5, 0.5]^2).
- * The marker is mounted flat mid-arm, so the jaw ends lie in its plane; vision maps
- * these into the raw frame every frame with the marker's homography.
+ * One marker's view of a utensil, in that marker's LOCAL coordinates (marker square = [-0.5, 0.5]^2).
+ * Calibrated with this marker's face up; vision maps it into the raw frame with the marker's homography.
  */
-export interface UtensilModel {
+export interface UtensilMarkerModel {
   markerId: number;
   parts: Record<ToolSurface, Polygon>;
   /** Jaw ends. Tool contacts test only these points, not the whole tip polygon. */
   tipContactPoints: Point[];
 }
+
+/**
+ * The tong arms are stacked when held, so each arm's outer face carries its own marker and only one
+ * faces the camera at a time. Vision places the tongs from whichever is visible; it never averages them.
+ */
+export interface UtensilModel {
+  markers: UtensilMarkerModel[];
+}
 export type UtensilModels = Partial<Record<UtensilId, UtensilModel>>;
-export const UTENSIL_MODELS_STORAGE_KEY = "ghosttrace.utensils.v1";
+export const UTENSIL_MODELS_STORAGE_KEY = "ghosttrace.utensils.v2";
 
 export interface Order {
   id: string;
