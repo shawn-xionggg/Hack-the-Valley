@@ -39,6 +39,19 @@ export interface WashEvent extends EventBase {
   verified: false; // always false
 }
 
+/**
+ * A3: hands and this utensil's jaw ends stayed in the sink together for washDwellMs. Vision always sends it
+ * directly after the hand `wash` from the same dwell. Resets ALL surfaces of that utensil. Never certifies cleanliness.
+ */
+export interface UtensilWashedEvent extends EventBase {
+  kind: "utensil-washed";
+  utensilId: UtensilId;
+  method: "zone-dwell";
+  durationMs?: number; // time the jaw ends and hands spent in the sink together
+  source: "camera" | "sim";
+  verified: false; // always false
+}
+
 /** A person confirmed the utensil was replaced. Resets ALL surfaces of that utensil (tip and handle). */
 export interface UtensilReplacedEvent extends EventBase {
   kind: "utensil-replaced-confirmed";
@@ -62,6 +75,7 @@ export interface SessionResetEvent extends EventBase {
 export type GhostEvent =
   | ContactEvent
   | WashEvent
+  | UtensilWashedEvent
   | UtensilReplacedEvent
   | AlertAcknowledgedEvent
   | SessionResetEvent;
@@ -77,6 +91,8 @@ export interface VisionStatus {
   handsVisible: number; // 0, 1 or 2 hands detected this frame
   activeZones: ContactTarget[]; // zones a fingertip is currently inside
   washProgress: number; // 0–1 progress toward a zone-dwell wash; 0 when hands are outside the wash zone
+  /** A3: 0–1 progress toward a utensil wash; 0 unless the hands and a tong jaw end are both in the sink. */
+  utensilWashProgress: number;
   fps: number;
   /** Tool→target pairs overlapping right now (before dwell), for the overlay. */
   activeToolContacts: { a: ToolSurface; b: ToolContactTarget }[];

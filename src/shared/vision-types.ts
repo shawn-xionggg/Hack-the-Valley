@@ -2,7 +2,7 @@
 // Spec: GhostTrace-summary-v5.md ("Module contracts").
 
 import type { Tuning, UtensilModels, ZoneLayout } from "./config";
-import type { ContactEvent, VisionStatus, WashEvent } from "./events";
+import type { ContactEvent, UtensilWashedEvent, VisionStatus, WashEvent } from "./events";
 
 export interface VisionOptions {
   /** A playing <video> element showing the RAW (unmirrored) camera stream. */
@@ -12,8 +12,8 @@ export interface VisionOptions {
   tuning?: Partial<Tuning>;
   /** Marker-relative utensil models. A utensil without one uses the fixed ZoneLayout polygons (tracking "fixed"). */
   utensilModels?: UtensilModels;
-  /** Called once per detected touch or wash. The only events vision ever emits. */
-  onEvent: (event: ContactEvent | WashEvent) => void;
+  /** Called once per detected touch, wash or utensil wash (A3: always right after its wash). The only events vision ever emits. */
+  onEvent: (event: ContactEvent | WashEvent | UtensilWashedEvent) => void;
   /** Called every processed frame (or throttled) for the debug panel and wash progress ring. */
   onStatus?: (status: VisionStatus) => void;
 }

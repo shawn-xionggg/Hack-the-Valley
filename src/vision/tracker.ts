@@ -144,6 +144,7 @@ export function createTracker(
       }
       return { t, handsVisible: hands.length, activeZones, fps,
         washProgress: wash ? Math.min(1, (t - wash.entered) / tuning.washDwellMs) : 0,
+        utensilWashProgress: 0, // A3: the tong dwell isn't built yet (§4.7 step 7)
         activeToolContacts, utensils: { tongs } };
     },
     /** Jaw ends of the current pose, for the debug overlay. Null unless tracked or held. */

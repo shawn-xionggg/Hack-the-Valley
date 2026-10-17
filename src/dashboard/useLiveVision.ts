@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 import { DEFAULT_TUNING, UTENSIL_MODELS_STORAGE_KEY, ZONE_LAYOUT_STORAGE_KEY } from "../shared/config";
 import type { Point, UtensilModels, ZoneLayout } from "../shared/config";
-import type { ContactEvent, VisionStatus, WashEvent } from "../shared/events";
+import type { ContactEvent, UtensilWashedEvent, VisionStatus, WashEvent } from "../shared/events";
 import type { VisionHandle } from "../shared/vision-types";
 import { startVision } from "../vision";
 import { parseZoneLayout } from "../vision/geometry";
@@ -54,7 +54,7 @@ function explain(error: unknown): string {
     : `Could not start tracking: ${error instanceof Error ? error.message : String(error)}. Check your internet connection for the model download.`;
 }
 
-export function useLiveVision(onEvent: (event: ContactEvent | WashEvent) => void): LiveVision {
+export function useLiveVision(onEvent: (event: ContactEvent | WashEvent | UtensilWashedEvent) => void): LiveVision {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [phase, setPhase] = useState<CameraPhase>("off");
   const [message, setMessage] = useState({ text: "Camera off. Start it to track contacts live, or replay a simulated act.", error: false });

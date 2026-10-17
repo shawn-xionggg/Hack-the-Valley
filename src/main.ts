@@ -1,7 +1,7 @@
 import "./style.css";
 import { SURFACES, UTENSIL_MODELS_STORAGE_KEY, ZONE_LAYOUT_STORAGE_KEY } from "./shared/config";
 import type { Point, Polygon, ToolSurface, UtensilModels, ZoneLayout, ZonedObjectId } from "./shared/config";
-import type { ContactEvent, VisionStatus, WashEvent } from "./shared/events";
+import type { ContactEvent, UtensilWashedEvent, VisionStatus, WashEvent } from "./shared/events";
 import type { VisionHandle } from "./shared/vision-types";
 import type { HandLandmarkerResult } from "@mediapipe/tasks-vision";
 import { startVision } from "./vision";
@@ -134,7 +134,7 @@ const TRACKING_LABELS: Record<VisionStatus["utensils"]["tongs"]["tracking"], str
 };
 let lastResults: HandLandmarkerResult | undefined;
 let status: VisionStatus | undefined;
-const events: (ContactEvent | WashEvent)[] = [];
+const events: (ContactEvent | WashEvent | UtensilWashedEvent)[] = [];
 
 function message(text: string, error = false) {
   el("message").textContent = text;
@@ -255,7 +255,7 @@ function updateStatus(next: VisionStatus) {
   enginePanel.setTracking(running ? next.utensils.tongs.tracking : null);
 }
 
-function logEvent(event: ContactEvent | WashEvent) {
+function logEvent(event: ContactEvent | WashEvent | UtensilWashedEvent) {
   events.push(event);
   if (events.length > 500) events.shift();
   const row = document.createElement("li");
@@ -264,7 +264,7 @@ function logEvent(event: ContactEvent | WashEvent) {
   const label = document.createElement("span");
   label.textContent = event.kind === "contact"
     ? `${event.a === "hands" ? "Hands" : SURFACES[event.a].label} → ${SURFACES[event.b].label}`
-    : "Wash zone dwell completed · unverified";
+    : event.kind === "wash" ? "Wash zone dwell completed · unverified" : "Tongs washed at the sink · unverified";
   const detail = document.createElement("span");
   detail.className = "event-detail";
   detail.textContent = event.kind === "contact"
@@ -305,7 +305,7 @@ function stopCamera(text = "Camera stopped. Start it again whenever you’re rea
   video.srcObject = null;
   lastResults = undefined;
   draft = []; cursor = undefined;
-  updateStatus({ t: performance.now(), handsVisible: 0, activeZones: [], washProgress: 0, fps: 0,
+  updateStatus({ t: performance.now(), handsVisible: 0, activeZones: [], washProgress: 0, utensilWashProgress: 0, fps: 0,
     activeToolContacts: [], utensils: fixedUtensilStatus(zones) });
   draw();
   el("empty").hidden = false;

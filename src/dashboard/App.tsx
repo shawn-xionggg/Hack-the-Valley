@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { createEngine } from "../engine";
 import { ORDERS } from "../shared/config";
-import type { ContactEvent, GhostEvent, WashEvent } from "../shared/events";
+import type { ContactEvent, GhostEvent, UtensilWashedEvent, WashEvent } from "../shared/events";
 import { DEMO_SCRIPT, MOVING_TONGS_SCRIPT } from "../sim/fixtures";
 import { chime } from "./chime";
 import { AlertPanel } from "./components/AlertPanel";
@@ -30,7 +30,7 @@ export function App() {
   const [deviceId, setDeviceId] = useState("");
 
   const dispatch = (event: GhostEvent) => engine.dispatch(event);
-  const vision = useLiveVision((event: ContactEvent | WashEvent) => { if (!simulated) dispatch(event); });
+  const vision = useLiveVision((event: ContactEvent | WashEvent | UtensilWashedEvent) => { if (!simulated) dispatch(event); });
   const live = vision.phase === "live";
   const tracking = live && vision.frame ? vision.frame.status.utensils.tongs.tracking : null;
 
