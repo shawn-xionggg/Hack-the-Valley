@@ -5,6 +5,7 @@ import type { ContactEvent, VisionStatus, WashEvent } from "./shared/events";
 import type { VisionHandle } from "./shared/vision-types";
 import type { HandLandmarkerResult } from "@mediapipe/tasks-vision";
 import { startVision } from "./vision";
+import { mountEnginePanel } from "./engine-panel";
 import { overlappingZones, polygonsOverlap, validatePolygon } from "./vision/geometry";
 import { fixedUtensilStatus } from "./vision/tracker";
 import { calibrateMarker, parseUtensilModels } from "./vision/pose";
@@ -84,6 +85,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         </section>
       </aside>
     </div>
+    <section class="panel engine-panel" id="engine-panel" aria-label="Exposure tracking"></section>
     <section class="panel events-panel"><div class="panel-heading"><h2>Activity <span id="event-count" class="count">0</span></h2><div><button class="text-button" id="export" disabled>Export JSON</button><button class="text-button" id="clear-events">Clear log</button></div></div>
       <div class="events-empty" id="events-empty">No contacts yet. Calibrate a zone and hold a fingertip inside it for 0.4 seconds.</div><ol id="events" class="events" aria-live="polite" aria-label="Recent contact and wash events"></ol>
     </section>
@@ -91,6 +93,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
   </main>`;
 
 function el<T extends HTMLElement>(id: string): T { return document.getElementById(id) as T; }
+const enginePanel = mountEnginePanel(el("engine-panel"));
 const video = el<HTMLVideoElement>("video");
 const canvas = el<HTMLCanvasElement>("overlay");
 const ctx = canvas.getContext("2d")!;
@@ -255,6 +258,7 @@ function updateStatus(next: VisionStatus) {
   el("wash-text").textContent = `${Math.round(next.washProgress * 100)}%`;
   el("tong-tracking").textContent = running ? TRACKING_LABELS[next.utensils.tongs.tracking] : "—";
   el("tong-tracking").classList.toggle("warn", running && next.utensils.tongs.tracking === "lost");
+  enginePanel.setTracking(running ? next.utensils.tongs.tracking : null);
 }
 
 function logEvent(event: ContactEvent | WashEvent) {
@@ -278,6 +282,7 @@ function logEvent(event: ContactEvent | WashEvent) {
   el("event-count").textContent = String(events.length);
   el("events-empty").hidden = true;
   el<HTMLButtonElement>("export").disabled = false;
+  enginePanel.onVisionEvent(event);
   // Integration point for a dashboard/engine without coupling the camera UI to it.
   window.dispatchEvent(new CustomEvent("ghosttrace:vision-event", { detail: event }));
 }

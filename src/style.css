@@ -92,3 +92,30 @@ footer .small-dot { width: 4px; height: 4px; }
 .trial-list li { font-size: 10px; color: #c4d0c7; padding: 6px 0; border-bottom: 1px solid #2b352e; font-variant-numeric: tabular-nums; }
 .trial-list li.warn { color: #f8bd72; }
 .status-row span.warn { color: #f8bd72; }
+/* Engine dev harness. Status colours follow spec §3.3: never green for "No tracked exposure". */
+.engine-panel { margin-top: 20px; }
+.sim-banner { background: #3a2f12; color: #ffd27a; border-bottom: 1px solid #6b5420; padding: 10px 20px; font-size: 11px; font-weight: 600; letter-spacing: .4px; }
+.order-line { margin: 16px 20px 0; font-size: 13px; color: #d5e0d8; }
+.surface-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; padding: 16px 20px; }
+.surface-card { display: flex; flex-direction: column; gap: 6px; border: 1px solid #3a4450; border-radius: 10px; padding: 14px; background: #161b21; }
+.surface-card strong { font: 600 14px 'Space Grotesk', sans-serif; }
+.surface-name { font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase; color: #95a3b3; }
+.surface-note { font-size: 10px; line-height: 1.5; color: #a9b6c4; }
+.surface-note.warn { color: #ffb36b; font-weight: 600; }
+.surface-card.no-tracked-exposure strong { color: #9fb6cf; }
+.surface-card.potential-exposure { border-color: #8a6420; background: #241c0f; }
+.surface-card.potential-exposure strong { color: #f5b14c; }
+.surface-card.action-required { border-color: #b33a3a; background: #2a1414; animation: gt-pulse 1.2s ease-in-out infinite; }
+.surface-card.action-required strong { color: #ff7b7b; }
+.surface-card.source { border-color: #6b4a2a; background: #21180f; }
+.surface-card.source strong { color: #e6a067; }
+@keyframes gt-pulse { 50% { box-shadow: 0 0 0 4px #ff5c5c44; } }
+.alert-card { margin: 0 20px 16px; border: 1px solid #b33a3a; border-radius: 10px; background: #241212; padding: 14px 16px; animation: gt-pulse 1.2s ease-in-out infinite; }
+.alert-card.acknowledged { animation: none; }
+.alert-card h3 { margin: 0 0 10px; font: 600 15px 'Space Grotesk', sans-serif; color: #ff8b8b; }
+.chain { margin: 0 0 10px; padding-left: 20px; font-size: 12px; color: #e3d6d6; }
+.chain-step { display: list-item; padding: 3px 0; }
+.chain-step time { margin-left: 10px; font-size: 10px; color: #a08f8f; }
+.chain-step.wash span { color: #9fb6cf; font-style: italic; }
+.alert-action { font-size: 11px; color: #d9c2c2; margin: 6px 0 10px; }
+.engine-actions { flex-wrap: wrap; padding-bottom: 4px; }
