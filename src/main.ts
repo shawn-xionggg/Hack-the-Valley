@@ -372,7 +372,8 @@ function feedTouchCapture(next: DetectedMarker[], aspect: number) {
   const updated = { ...entry, touchSides: { ...entry.touchSides, [c.target]: result.side } };
   utensilModels = { tongs: { markers: utensilModels.tongs!.markers.map(m => m.markerId === c.markerId ? updated : m) } };
   saveUtensilModels();
-  el("calibration-help").textContent = `ID ${c.markerId} ${TOUCH_LABELS[c.target]} touch saved. Tool contacts with it now need the tips down at this height.`;
+  el("calibration-help").textContent = `ID ${c.markerId} ${TOUCH_LABELS[c.target]} touch saved. Tool contacts with it now need the tips down at this height`
+    + (c.target === "peanut-source" ? ", and so does a tong wash at the sink (same rim height)." : ".");
 }
 
 function stopCamera(text = "Camera stopped. Start it again whenever you’re ready.") {

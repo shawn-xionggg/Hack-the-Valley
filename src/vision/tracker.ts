@@ -62,8 +62,8 @@ export function createTracker(
   /** Hand dwell for one sink visit. `utensilFired`: the wash + utensil-washed pair went out this visit. */
   let wash: { entered: number; lastInside: number; fired: boolean; utensilFired: boolean } | undefined;
   /**
-   * A3 tong dwell, alive only inside a hand dwell. `lastPosed` is the last tracked or held frame, so only
-   * lost frames count toward the utensilWashGapMs gap.
+   * A3 tong dwell, alive only inside a hand dwell. `lastPosed` is the last tracked or held frame down in the
+   * sink, so only lost and (A4) raised frames count toward the utensilWashGapMs gap.
    */
   let utensilWash: { entered: number; lastPosed: number } | undefined;
   let previousTime: number | undefined;
@@ -160,11 +160,15 @@ export function createTracker(
       }
 
       // A3 tong dwell. Plain containment, not the grown tool-contact zone: a clearing event stays conservative.
-      // Lost frames can only bridge a gap; it starts and fires on tracked frames (invariant 9: no invented pose).
+      // A4: jaw ends over the sink but above the peanut touch height (bowl and sink rims match) are "raised".
+      // Lost and raised frames can only bridge a gap; it starts and fires on tracked frames down in the sink
+      // (invariant 9: no invented pose).
+      const overSink = !!current?.tipContactPoints.some(p => pointInPolygon(p, sink));
+      const downInSink = overSink && lowEnoughToTouch(current!, "peanut-source", tuning.toolContactSideMargin);
       if (!wash || tongs.tracking === "fixed") utensilWash = undefined;
-      else if (tongs.tracking === "lost") {
+      else if (tongs.tracking === "lost" || (overSink && !downInSink)) {
         if (utensilWash && t - utensilWash.lastPosed > tuning.utensilWashGapMs) utensilWash = undefined;
-      } else if (!current?.tipContactPoints.some(p => pointInPolygon(p, sink))) utensilWash = undefined;
+      } else if (!overSink) utensilWash = undefined;
       else {
         // No restart after the pair fired: it can't fire again this visit, so its progress would mislead.
         if (tongs.tracking === "tracked" && !wash.utensilFired) utensilWash ??= { entered: t, lastPosed: t };
@@ -173,7 +177,8 @@ export function createTracker(
 
       if (wash && inWash) {
         // Once per visit. The pair still fires after a hands-only wash, and replaces it when both are due.
-        if (!wash.utensilFired && utensilWash && tongs.tracking === "tracked" && t - utensilWash.entered >= tuning.washDwellMs) {
+        if (!wash.utensilFired && utensilWash && tongs.tracking === "tracked" && downInSink
+          && t - utensilWash.entered >= tuning.washDwellMs) {
           wash.fired = wash.utensilFired = true;
           onEvent({ id: crypto.randomUUID(), t, kind: "wash", method: "zone-dwell",
             durationMs: t - wash.entered, source: "camera", verified: false });

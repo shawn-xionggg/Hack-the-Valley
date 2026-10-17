@@ -444,10 +444,50 @@ describe("height gate (A4)", () => {
     expect(contacts(events)).toEqual(["hands>peanut-source@400"]);
   });
 
-  it("leaves the A3 sink dwell ungated", () => {
+});
+
+// Sink gate (A4 §4.4 Utensil wash): judged against the peanut reference, since the bowl and sink rims match.
+// Both tags put a jaw end inside SINK; the 0.06 one is raised.
+describe("sink gate (A4)", () => {
+  const peanutTouched = () => models(touched({ "peanut-source": 0.05 }));
+
+  it("sends a hand wash only while the tongs are held above the sink", () => {
     const events: Emitted[] = [];
-    const sides = { "peanut-source": 0.05, "meal-1": 0.05 };
-    const tracker = createTracker(sinkTable(), event => events.push(event), {}, models(touched(sides)));
+    const tracker = createTracker(sinkTable(), event => events.push(event), {}, peanutTouched());
+    expect(frames(tracker, 0, 6000, [washingHand], lifted).utensilWashProgress).toBe(0);
+    expect(washes(events)).toEqual(["wash@6000"]);
+  });
+
+  it("bridges a raised gap under utensilWashGapMs, and the pair still fires", () => {
+    const events: Emitted[] = [];
+    const tracker = createTracker(sinkTable(), event => events.push(event), {}, peanutTouched());
+    frames(tracker, 0, 2000, [washingHand], resting);
+    frames(tracker, 2100, 3000, [washingHand], lifted);
+    frames(tracker, 3100, 6000, [washingHand], resting);
+    expect(washes(events)).toEqual(["wash@6000", "utensil-washed@6000"]);
+  });
+
+  it("resets the tong dwell after a raised gap over utensilWashGapMs; the hand wash fires alone", () => {
+    const events: Emitted[] = [];
+    const tracker = createTracker(sinkTable(), event => events.push(event), {}, peanutTouched());
+    frames(tracker, 0, 2000, [washingHand], resting);
+    frames(tracker, 2100, 4000, [washingHand], lifted);
+    frames(tracker, 4100, 9000, [washingHand], resting);
+    expect(washes(events)).toEqual(["wash@6000"]);
+  });
+
+  it("never fires the pair on a raised frame", () => {
+    const events: Emitted[] = [];
+    const tracker = createTracker(sinkTable(), event => events.push(event), {}, peanutTouched());
+    frames(tracker, 0, 5900, [washingHand], resting);
+    frames(tracker, 6000, 6400, [washingHand], lifted); // due, but raised: the hand wash goes out alone
+    frames(tracker, 6500, 6500, [washingHand], resting);
+    expect(washes(events)).toEqual(["wash@6000", "wash@6500", "utensil-washed@6500"]);
+  });
+
+  it("uses only the peanut reference: with just a plate reference, A3 is unchanged", () => {
+    const events: Emitted[] = [];
+    const tracker = createTracker(sinkTable(), event => events.push(event), {}, models(touched({ "meal-1": 0.05 })));
     frames(tracker, 0, 6000, [washingHand], lifted);
     expect(washes(events)).toEqual(["wash@6000", "utensil-washed@6000"]);
   });
