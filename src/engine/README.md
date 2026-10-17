@@ -39,3 +39,22 @@ validation of untyped camera payloads. Wash, replacement, reset, order alerts,
 and subscriptions remain future work. A meal reached by exposure gets
 `potential-exposure`; the future alert layer will set `action-required`.
 
+
+## Reconstructing exposure history
+
+Call `buildExposureChain(state, recordId)` with an exposure record ID, for example
+one from `state.surfaces["tongs-tip"].activeRecordIds`. On success it returns
+`{ ok: true, chain }`, using the shared `ChainStep` format in causal order from
+origin to destination. Each transfer includes its event ID and timestamp.
+Equal timestamps retain parent-before-child order. This reads memory only;
+it does not save history to disk or connect the UI to live events.
+
+The function checks parent links against the applied contact events in `state.log`.
+Ignored duplicate deliveries are not evidence. Missing records, cycles, ambiguous
+record IDs, inconsistent links, or missing/mismatched event evidence return
+`{ ok: false, error, recordId }` with no partial chain. Callers should show history
+as unavailable on failure, not present a shortened path as complete.
+
+Cleared exposure records remain traceable. This milestone reconstructs origins
+and transfers only; insertion of wash steps will accompany wash handling.
+Alerts and the full engine dispatcher remain separate work.
