@@ -115,3 +115,16 @@ export function validatePolygon(polygon: Polygon): string | null {
   if (area > MAX_ZONE_AREA) return "Zone covers over half the frame. Outline just the object.";
   return null;
 }
+
+const ZONED_IDS: readonly ZonedObjectId[] = ["peanut-source", "tongs-tip", "tongs-handle", "meal-1", "wash-station"];
+
+/** A stored ZoneLayout (localStorage or an export), or null if any zone is malformed. Empty polygons mean "unset". */
+export function parseZoneLayout(value: unknown): ZoneLayout | null {
+  if (!value || typeof value !== "object") return null;
+  const valid = ZONED_IDS.every(id => {
+    const polygon: unknown = (value as Record<string, unknown>)[id];
+    return Array.isArray(polygon) && (polygon.length === 0 || polygon.length >= 3) && polygon.every(p =>
+      Array.isArray(p) && p.length === 2 && p.every(n => typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1));
+  });
+  return valid ? value as ZoneLayout : null;
+}

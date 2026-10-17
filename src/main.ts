@@ -6,7 +6,7 @@ import type { VisionHandle } from "./shared/vision-types";
 import type { HandLandmarkerResult } from "@mediapipe/tasks-vision";
 import { startVision } from "./vision";
 import { mountEnginePanel } from "./engine-panel";
-import { overlappingZones, polygonsOverlap, validatePolygon } from "./vision/geometry";
+import { overlappingZones, parseZoneLayout, polygonsOverlap, validatePolygon } from "./vision/geometry";
 import { fixedUtensilStatus } from "./vision/tracker";
 import { calibrateMarker, parseUtensilModels } from "./vision/pose";
 import {
@@ -19,14 +19,8 @@ const zoneIds: ZonedObjectId[] = ["peanut-source", "tongs-tip", "tongs-handle", 
 const colors = ["#f8bd72", "#baabff", "#84b8ff", "#fc91ac", "#79ddc1"];
 const emptyZones = (): ZoneLayout => ({ "peanut-source": [], "tongs-tip": [], "tongs-handle": [], "meal-1": [], "wash-station": [] });
 let zones = emptyZones();
-try {
-  const stored: unknown = JSON.parse(localStorage.getItem(ZONE_LAYOUT_STORAGE_KEY) ?? "null");
-  if (stored && typeof stored === "object" && zoneIds.every(id => {
-    const polygon: unknown = (stored as Record<string, unknown>)[id];
-    return Array.isArray(polygon) && (polygon.length === 0 || polygon.length >= 3) && polygon.every(p =>
-      Array.isArray(p) && p.length === 2 && p.every(n => typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1));
-  })) zones = stored as ZoneLayout;
-} catch { /* Storage can be unavailable; calibration still works for this session. */ }
+try { zones = parseZoneLayout(JSON.parse(localStorage.getItem(ZONE_LAYOUT_STORAGE_KEY) ?? "null")) ?? zones; }
+catch { /* Storage can be unavailable; calibration still works for this session. */ }
 let utensilModels: UtensilModels = {};
 try { utensilModels = parseUtensilModels(JSON.parse(localStorage.getItem(UTENSIL_MODELS_STORAGE_KEY) ?? "null")); }
 catch { /* As above: without stored models the tongs start "fixed". */ }
@@ -89,7 +83,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
     <section class="panel events-panel"><div class="panel-heading"><h2>Activity <span id="event-count" class="count">0</span></h2><div><button class="text-button" id="export" disabled>Export JSON</button><button class="text-button" id="clear-events">Clear log</button></div></div>
       <div class="events-empty" id="events-empty">No contacts yet. Calibrate a zone and hold a fingertip inside it for 0.4 seconds.</div><ol id="events" class="events" aria-live="polite" aria-label="Recent contact and wash events"></ol>
     </section>
-    <footer><span><span class="small-dot"></span> Local inference · No video uploads</span><span>Zone overlap estimates contact. Wash events are unverified.</span></footer>
+    <footer><span><span class="small-dot"></span> Local inference · No video uploads · <a href="./dashboard.html">Open the dashboard</a></span><span>Zone overlap estimates contact. Wash events are unverified.</span></footer>
   </main>`;
 
 function el<T extends HTMLElement>(id: string): T { return document.getElementById(id) as T; }

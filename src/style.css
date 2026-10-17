@@ -119,3 +119,4 @@ footer .small-dot { width: 4px; height: 4px; }
 .chain-step.wash span { color: #9fb6cf; font-style: italic; }
 .alert-action { font-size: 11px; color: #d9c2c2; margin: 6px 0 10px; }
 .engine-actions { flex-wrap: wrap; padding-bottom: 4px; }
+footer a { color: #a7c8ad; }
