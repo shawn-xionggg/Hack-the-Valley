@@ -24,7 +24,7 @@ const run = (scenario: Scenario): EngineState => {
 
 const render = (state: EngineState, tracking: UtensilTracking | null = null) => renderToStaticMarkup(
   <>
-    <SurfaceCards state={state} tracking={tracking} />
+    <SurfaceCards state={state} tracking={tracking} onReplaceTongs={() => {}} />
     <AlertPanel alerts={state.alerts} onAcknowledge={() => {}} />
   </>,
 );
@@ -93,6 +93,15 @@ describe("dashboard rendering", () => {
     expect(html.match(/Tong tracking lost — contacts not recorded/g)).toHaveLength(2);
     expect(render(run({ ...MOVING_TONGS_SCRIPT, events: [] }), "tracked")).not.toContain("Tong tracking lost");
     expect(render(run({ ...MOVING_TONGS_SCRIPT, events: [] }), "fixed").match(/Tongs: fixed position/g)).toHaveLength(2);
+  });
+
+  it("offers tong replacement only while a tong part has tracked exposure", () => {
+    expect(render(run({ ...DEMO_SCRIPT, events: [] }))).not.toContain(labels.TONGS_REPLACE_BUTTON);
+    expect(render(run(DEMO_SCRIPT))).toContain(labels.TONGS_REPLACE_BUTTON);
+    expect(render(run(MOVING_TONGS_SCRIPT))).toContain(labels.TONGS_REPLACE_PROMPT);
+    const replaced = run({ ...DEMO_SCRIPT, events: [...DEMO_SCRIPT.events,
+      { id: "r1", t: 99_000, kind: "utensil-replaced-confirmed", utensilId: "tongs", source: "manual" }] });
+    expect(render(replaced)).not.toContain(labels.TONGS_REPLACE_BUTTON);
   });
 
   it("offers acknowledgement until the alert is acknowledged", () => {

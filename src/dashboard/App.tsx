@@ -12,7 +12,7 @@ import { CameraView } from "./components/CameraView";
 import { EventLog } from "./components/EventLog";
 import { SurfaceCards } from "./components/SurfaceCards";
 import { VisionStrip } from "./components/VisionStrip";
-import { SCOPE_NOTE } from "./labels";
+import { MANUAL_WASH_BUTTON, MANUAL_WASH_NOTE, SCOPE_NOTE } from "./labels";
 import { createSimulator } from "./simulation";
 import { useEngineState } from "./useEngineState";
 import { useLiveVision } from "./useLiveVision";
@@ -62,6 +62,7 @@ export function App() {
         <div className="sim-banner" role="status">
           SIMULATED — scripted events replayed through the real engine, not the camera.
           {simulator.playing ? " Replay running…" : " Replay finished."} Reset the session to return to live.
+          <button className="button banner-button" onClick={reset}>Reset session</button>
         </div>
       )}
       <header className="topbar">
@@ -101,36 +102,39 @@ export function App() {
 
         <section className="panel status-panel" aria-label="Tracked exposure">
           <h2>Tracked exposure</h2>
-          <SurfaceCards state={state} tracking={tracking} />
+          <SurfaceCards state={state} tracking={tracking}
+            onReplaceTongs={() => dispatch({ ...stamp(), kind: "utensil-replaced-confirmed", utensilId: "tongs", source: "manual" })} />
           <h2 className={hasAlert ? "alerting" : undefined}>Alerts</h2>
           <AlertPanel alerts={state.alerts}
             onAcknowledge={alertId => dispatch({ ...stamp(), kind: "alert-acknowledged", alertId, source: "manual" })} />
+          <p className="scope-note">{SCOPE_NOTE}</p>
         </section>
 
-        <section className="panel controls-panel" aria-label="Controls">
-          <h2>Staff actions</h2>
+        {/* Operator-only controls stay out of the way: the worker's own action (replacing tongs) is under the cards. */}
+        <details className="panel controls-panel">
+          <summary><h2>Operator controls</h2></summary>
           <div className="controls">
-            <button className="button" onClick={() => dispatch({ ...stamp(), kind: "wash", method: "manual-tap", source: "manual", verified: false })}>
-              Confirm hands washed with soap and water
-            </button>
-            <button className="button" onClick={() => dispatch({ ...stamp(), kind: "utensil-replaced-confirmed", utensilId: "tongs", source: "manual" })}>
-              Confirm tongs replaced
-            </button>
             <button className="button" onClick={reset}>Reset session</button>
           </div>
+          <h2>Wash fallback</h2>
+          <div className="controls">
+            <button className="button" onClick={() => dispatch({ ...stamp(), kind: "wash", method: "manual-tap", source: "manual", verified: false })}>
+              {MANUAL_WASH_BUTTON}
+            </button>
+          </div>
+          <p className="scope-note">{MANUAL_WASH_NOTE}</p>
           <h2>Simulated replay</h2>
           <div className="controls">
             <button className="button" onClick={() => simulate(DEMO_SCRIPT.events)}>Act 1 · exposure outlasts a hand wash</button>
             <button className="button" onClick={() => simulate(MOVING_TONGS_SCRIPT.events)}>Act 2 · moving tongs</button>
             {simulator.playing && <button className="button" onClick={() => simulator.cancel()}>Stop replay</button>}
           </div>
-          <p className="scope-note">{SCOPE_NOTE}</p>
-        </section>
+        </details>
 
-        <section className="panel log-panel" aria-label="Event log">
-          <h2>Event log <span className="count">{state.log.length}</span></h2>
+        <details className="panel log-panel">
+          <summary><h2>Event log <span className="count">{state.log.length}</span></h2></summary>
           <EventLog log={state.log} />
-        </section>
+        </details>
       </main>
     </div>
   );
