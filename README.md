@@ -54,7 +54,7 @@ Once a face is calibrated, the tip and handle zones follow whichever calibrated 
 - **Tong tracking lost — contacts not recorded:** no tag for longer than that. No contact of any kind involves the tongs.
 - **Tongs: fixed position:** nothing is calibrated, so the static tip and handle zones are used and there are no tool contacts.
 
-Tool contacts fire when a jaw end (white dot) comes within 0.6 tag widths (about 15 mm with a 25 mm tag) of the peanut or meal zone, or when the handle outline does. They use the same 400 ms dwell, exit and re-fire rules as hand contacts. The log shows them as, for example, **Tong tips → Peanut source** with the percentage of tracked frames.
+Tool contacts fire when a jaw end (white dot) comes within 0.6 tag widths (about 15 mm with a 25 mm tag) of the peanut or meal zone. The handle never fires a tool contact (spec amendment A2): from overhead, a handle above the bowl during a scoop looks the same as one resting in it, so the handle is exposed only through hand contacts. They use the same 400 ms dwell, exit and re-fire rules as hand contacts. The log shows them as, for example, **Tong tips → Peanut source** with the percentage of tracked frames.
 
 `src/vision/aruco.ts` wraps [js-aruco2](https://github.com/damianofalcioni/js-aruco2). `startVision` detects tags on the same frame as the hands, at the camera's native resolution, because downscaling the 720p feed would halve tag size and double pose error. `src/vision/pose.ts` holds the homography, calibration and pose math, and `src/vision/tracker.ts` holds the tracking states and tool contacts.
 

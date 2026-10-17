@@ -188,12 +188,23 @@ describe("moving tongs", () => {
     expect(fires(TOOL_ZONE_MARGIN * SIDE * 1.1)).toBe(false);
   });
 
-  it("fires a handle contact when the handle rests on the meal", () => {
+  it("never emits a handle tool contact, even with the handle over the meal (A2)", () => {
     const events: (ContactEvent | WashEvent)[] = [];
     const tracker = createTracker({ ...table(), "peanut-source": [], "meal-1": box(0.8, 0.4, 0.95, 0.6) }, event => events.push(event), {}, models());
-    for (let t = 0; t <= 400; t += 100) tracker.update([], t, 10, seen(tag(11)));
-    expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({ a: "tongs-handle", b: "meal-1" });
+    let status;
+    for (let t = 0; t <= 1500; t += 100) status = tracker.update([], t, 10, seen(tag(11)));
+    expect(status!.activeToolContacts).toEqual([]);
+    expect(events).toEqual([]);
+  });
+
+  it("a scoop with the handle over the bowl exposes only the tips (A2)", () => {
+    const events: (ContactEvent | WashEvent)[] = [];
+    // The bowl spans the jaw end (x 0.3) and the start of the handle (x 0.55–0.6).
+    const tracker = createTracker({ ...table(), "peanut-source": box(0.25, 0.4, 0.6, 0.6) }, event => events.push(event), {}, models());
+    let status;
+    for (let t = 0; t <= 1500; t += 100) status = tracker.update([], t, 10, seen(tag(11)));
+    expect(status!.activeToolContacts).toEqual([{ a: "tongs-tip", b: "peanut-source" }]);
+    expect(events.map(e => e.kind === "contact" && e.a)).toEqual(["tongs-tip", "tongs-tip"]);
   });
 
   it("tests fingertips against the moving parts, not the static tong zones", () => {
