@@ -60,5 +60,6 @@ export async function startVision(options: LiveVisionOptions): Promise<VisionHan
     animation = requestAnimationFrame(tick);
   };
   animation = requestAnimationFrame(tick);
-  return { stop, setZones: tracker.setZones };
+  // Marker tracking isn't built yet (spec v5 §4.6): models are accepted, and the tongs stay "fixed".
+  return { stop, setZones: tracker.setZones, setUtensilModels: () => {} };
 }

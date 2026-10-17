@@ -1,7 +1,7 @@
 // GhostTrace vision module API — what Person 1 implements and Person 2 wires up.
-// Spec: GhostTrace-summary-v4.md ("Module contracts").
+// Spec: GhostTrace-summary-v5.md ("Module contracts").
 
-import type { Tuning, ZoneLayout } from "./config";
+import type { Tuning, UtensilModels, ZoneLayout } from "./config";
 import type { ContactEvent, VisionStatus, WashEvent } from "./events";
 
 export interface VisionOptions {
@@ -10,6 +10,8 @@ export interface VisionOptions {
   /** Calibrated zones in normalized raw-frame coordinates. */
   zones: ZoneLayout;
   tuning?: Partial<Tuning>;
+  /** Marker-relative utensil models. A utensil without one uses the fixed ZoneLayout polygons (tracking "fixed"). */
+  utensilModels?: UtensilModels;
   /** Called once per detected touch or wash. The only events vision ever emits. */
   onEvent: (event: ContactEvent | WashEvent) => void;
   /** Called every processed frame (or throttled) for the debug panel and wash progress ring. */
@@ -20,6 +22,8 @@ export interface VisionHandle {
   stop(): void;
   /** Swap zones after recalibration without restarting the camera. */
   setZones(zones: ZoneLayout): void;
+  /** Swap utensil models after recalibration without restarting the camera. */
+  setUtensilModels(models: UtensilModels): void;
 }
 
 export type StartVision = (options: VisionOptions) => Promise<VisionHandle>;

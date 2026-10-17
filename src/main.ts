@@ -6,6 +6,7 @@ import type { VisionHandle } from "./shared/vision-types";
 import type { HandLandmarkerResult } from "@mediapipe/tasks-vision";
 import { startVision } from "./vision";
 import { overlappingZones, validatePolygon } from "./vision/geometry";
+import { fixedUtensilStatus } from "./vision/tracker";
 
 const zoneIds: ZonedObjectId[] = ["peanut-source", "tongs-tip", "tongs-handle", "meal-1", "wash-station"];
 const colors = ["#f8bd72", "#baabff", "#84b8ff", "#fc91ac", "#79ddc1"];
@@ -172,7 +173,9 @@ function logEvent(event: ContactEvent | WashEvent) {
   const time = document.createElement("time");
   time.textContent = new Date().toLocaleTimeString();
   const label = document.createElement("span");
-  label.textContent = event.kind === "contact" ? `Hands → ${SURFACES[event.b].label}` : "Wash zone dwell completed · unverified";
+  label.textContent = event.kind === "contact"
+    ? `${event.a === "hands" ? "Hands" : SURFACES[event.a].label} → ${SURFACES[event.b].label}`
+    : "Wash zone dwell completed · unverified";
   const detail = document.createElement("span");
   detail.className = "event-detail";
   detail.textContent = event.kind === "contact" ? `${Math.round(event.confidence * 100)}% overlap frames` : `${((event.durationMs ?? 0) / 1000).toFixed(1)}s in zone`;
@@ -194,7 +197,8 @@ function stopCamera(text = "Camera stopped. Start it again whenever you’re rea
   video.srcObject = null;
   lastResults = undefined;
   draft = []; cursor = undefined;
-  updateStatus({ t: performance.now(), handsVisible: 0, activeZones: [], washProgress: 0, fps: 0 });
+  updateStatus({ t: performance.now(), handsVisible: 0, activeZones: [], washProgress: 0, fps: 0,
+    activeToolContacts: [], utensils: fixedUtensilStatus(zones) });
   draw();
   el("empty").hidden = false;
   el("badge").textContent = "● Camera offline";

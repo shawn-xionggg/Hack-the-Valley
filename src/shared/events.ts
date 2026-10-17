@@ -1,8 +1,8 @@
 // GhostTrace shared event schema — the ONLY way anything changes engine state.
 // Engine state is a pure function of the ordered event log: replaying the same
-// events always produces the same state. Spec: GhostTrace-summary-v4.md.
+// events always produces the same state. Spec: GhostTrace-summary-v5.md.
 
-import type { ContactTarget, UtensilId } from "./config";
+import type { ContactTarget, Polygon, ToolContactTarget, ToolSurface, UtensilId } from "./config";
 
 export type EventSource = "camera" | "manual" | "sim";
 export type WashMethod = "zone-dwell" | "motion" | "manual-tap" | "manual-voice";
@@ -14,15 +14,21 @@ interface EventBase {
   t: number;
 }
 
-/** A fingertip dwelled in a surface's zone. Fired ONCE per touch (enter → dwell → fire; must exit before the next). */
-export interface ContactEvent extends EventBase {
+/** Who touched what. Hands touch any target; a tong part touches only static targets, never the other part. */
+export type ContactPair =
+  | { a: "hands"; b: ContactTarget } // b is "tongs-tip" or "tongs-handle", never "tongs"
+  | { a: ToolSurface; b: ToolContactTarget };
+
+/**
+ * Two surfaces overlapped long enough to count as one touch. Fires after dwell, then
+ * re-fires every heldContactRefireMs while the pair stays occupied (each with a new id).
+ */
+export type ContactEvent = EventBase & ContactPair & {
   kind: "contact";
-  a: "hands";
-  b: ContactTarget; // "tongs-tip" or "tongs-handle", never "tongs"
-  /** Fraction (0–1) of dwell-window frames where a fingertip was inside the zone. NOT a probability of physical contact. */
+  /** Fraction (0–1) of dwell-window frames with overlap; tool contacts count only "tracked" frames. NOT a probability of physical contact. */
   confidence: number;
   source: "camera" | "sim";
-}
+};
 
 /** Hands were washed. Clears tracked exposure on "hands" ONLY. Never certifies cleanliness. */
 export interface WashEvent extends EventBase {
@@ -72,4 +78,17 @@ export interface VisionStatus {
   activeZones: ContactTarget[]; // zones a fingertip is currently inside
   washProgress: number; // 0–1 progress toward a zone-dwell wash; 0 when hands are outside the wash zone
   fps: number;
+  /** Tool→target pairs overlapping right now (before dwell), for the overlay. */
+  activeToolContacts: { a: ToolSurface; b: ToolContactTarget }[];
+  utensils: Record<UtensilId, UtensilPoseStatus>;
+}
+
+/** "fixed" = no marker model calibrated: the static ZoneLayout polygons are used (v4 behaviour). */
+export type UtensilTracking = "tracked" | "held" | "lost" | "fixed";
+
+export interface UtensilPoseStatus {
+  tracking: UtensilTracking;
+  /** Current part polygons in the raw frame; null while lost. */
+  parts: Record<ToolSurface, Polygon> | null;
+  lastSeenT: number | null;
 }

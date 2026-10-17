@@ -1,6 +1,6 @@
 // GhostTrace shared configuration — single source of truth for object IDs,
 // surfaces, zones, orders, and tunable thresholds.
-// Spec: GhostTrace-summary-v4.md ("Shared Integration Contract").
+// Spec: GhostTrace-summary-v5.md ("Shared Integration Contract").
 
 export const ALLERGENS = ["peanut"] as const;
 export type Allergen = (typeof ALLERGENS)[number];
@@ -81,6 +81,29 @@ export const UTENSILS: Record<UtensilId, readonly ContactTarget[]> = {
   tongs: ["tongs-tip", "tongs-handle"],
 };
 
+/** Utensil parts that are tracked and can act in a contact. */
+export type ToolSurface = "tongs-tip" | "tongs-handle";
+
+/** Who can initiate a contact: the hands, or a tracked tong part. */
+export type ContactActor = "hands" | ToolSurface;
+
+/** Static targets a tracked tool can touch (never another tool part). */
+export type ToolContactTarget = Exclude<ContactTarget, ToolSurface>; // "peanut-source" | "meal-1"
+
+/**
+ * A utensil's parts in MARKER-LOCAL coordinates (marker square = [-0.5, 0.5]^2).
+ * The marker is mounted flat mid-arm, so the jaw ends lie in its plane; vision maps
+ * these into the raw frame every frame with the marker's homography.
+ */
+export interface UtensilModel {
+  markerId: number;
+  parts: Record<ToolSurface, Polygon>;
+  /** Jaw ends. Tool contacts test only these points, not the whole tip polygon. */
+  tipContactPoints: Point[];
+}
+export type UtensilModels = Partial<Record<UtensilId, UtensilModel>>;
+export const UTENSIL_MODELS_STORAGE_KEY = "ghosttrace.utensils.v1";
+
 export interface Order {
   id: string;
   displayName: string;
@@ -107,6 +130,10 @@ export interface Tuning {
   washDwellMs: number;
   /** MediaPipe fingertip landmark indices used for zone overlap. */
   fingertipLandmarks: readonly number[];
+  /** Keep the last utensil pose this long after its marker disappears ("held"). */
+  utensilHoldMs: number;
+  /** While a contact pair stays occupied, emit a fresh contact this often. */
+  heldContactRefireMs: number;
 }
 
 export const DEFAULT_TUNING: Tuning = {
@@ -115,4 +142,6 @@ export const DEFAULT_TUNING: Tuning = {
   minContactConfidence: 0.6,
   washDwellMs: 6000,
   fingertipLandmarks: [4, 8, 12, 16, 20], // thumb, index, middle, ring, pinky tips
+  utensilHoldMs: 500,
+  heldContactRefireMs: 1000,
 };

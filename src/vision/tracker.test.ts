@@ -27,6 +27,34 @@ describe("vision event integration", () => {
     expect(events[0]!.id).not.toBe(events[1]!.id);
   });
 
+  it("re-fires every heldContactRefireMs while held, each with a fresh id", () => {
+    const events: (ContactEvent | WashEvent)[] = [];
+    const tracker = createTracker(zones(), event => events.push(event));
+    for (let t = 0; t <= 2500; t += 100) tracker.update([hand], t, 10);
+    expect(events.map(e => e.t)).toEqual([400, 1400, 2400]);
+    expect(new Set(events.map(e => e.id)).size).toBe(3);
+  });
+
+  it("scores each re-fire on the frames since the previous emission", () => {
+    const events: (ContactEvent | WashEvent)[] = [];
+    const tracker = createTracker(zones(), event => events.push(event));
+    for (let t = 0; t <= 400; t += 100) tracker.update([hand], t, 10);
+    tracker.update([], 500, 10); // brief gaps under contactExitMs keep the dwell alive
+    tracker.update([], 600, 10);
+    for (let t = 700; t <= 1400; t += 100) tracker.update([hand], t, 10);
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({ t: 400, confidence: 1 });
+    expect(events[1]).toMatchObject({ t: 1400, confidence: 0.8 }); // 8 of the 10 frames 500–1400
+  });
+
+  it("reports fixed tong polygons and no tool contacts until marker tracking exists", () => {
+    const layout = { ...zones(), "tongs-tip": square };
+    const status = createTracker(layout, () => {}).update([hand], 0, 10);
+    expect(status.activeToolContacts).toEqual([]);
+    expect(status.utensils.tongs).toEqual({ tracking: "fixed", lastSeenT: null,
+      parts: { "tongs-tip": square, "tongs-handle": [] } });
+  });
+
   it("does not count a camera stall as observed dwell", () => {
     const events: (ContactEvent | WashEvent)[] = [];
     const tracker = createTracker(zones(), event => events.push(event));

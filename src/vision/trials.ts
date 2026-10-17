@@ -1,4 +1,4 @@
-import { OBJECT_IDS, SURFACES } from "../shared/config";
+import { DEFAULT_TUNING, OBJECT_IDS, SURFACES } from "../shared/config";
 import type { ContactTarget } from "../shared/config";
 import type { ContactEvent, WashEvent } from "../shared/events";
 
@@ -47,11 +47,27 @@ const isOtherTongPart = (event: VisionEvent, expected: TrialTarget) => {
   return utensil !== undefined && SURFACES[event.b].utensilId === utensil;
 };
 
+/**
+ * Drops held re-fires: a contact for the same pair at least refireMs after the previous one is the
+ * same touch still held. A real double fire needs exit + re-dwell (≥ 700 ms), so it lands sooner.
+ */
+function withoutHeldRefires(cluster: VisionEvent[], refireMs: number): VisionEvent[] {
+  const last = new Map<string, number>();
+  return [...cluster].sort((a, b) => a.t - b.t).filter(event => {
+    if (event.kind !== "contact") return true;
+    const key = `${event.a}>${event.b}`;
+    const previous = last.get(key);
+    last.set(key, event.t);
+    return previous === undefined || event.t - previous < refireMs;
+  });
+}
+
 /** Worst problem wins: a tip/handle mix-up matters more than a stray zone, which matters more than a double fire. */
-export function classifyAttempt(cluster: VisionEvent[], expected: TrialTarget): Outcome {
+export function classifyAttempt(cluster: VisionEvent[], expected: TrialTarget,
+  refireMs = DEFAULT_TUNING.heldContactRefireMs): Outcome {
   if (cluster.some(event => isOtherTongPart(event, expected))) return "wrong-tong-part";
   if (cluster.some(event => !hits(event, expected))) return "unexpected";
-  return cluster.length > 1 ? "fired-twice" : "correct";
+  return withoutHeldRefires(cluster, refireMs).length > 1 ? "fired-twice" : "correct";
 }
 
 export function tallyTrial(events: VisionEvent[], expected: TrialTarget, attempts: number | null = null,

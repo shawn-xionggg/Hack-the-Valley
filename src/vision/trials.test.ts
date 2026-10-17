@@ -26,6 +26,13 @@ describe("rig trial tally", () => {
     expect(classifyAttempt([wash(0)], "none")).toBe("unexpected");
   });
 
+  it("counts a held touch's re-fires as one touch, not a double fire", () => {
+    const held = [contact("tongs-handle", 400), contact("tongs-handle", 1400), contact("tongs-handle", 2400)];
+    expect(classifyAttempt(held, "tongs-handle")).toBe("correct");
+    expect(classifyAttempt([...held, contact("tongs-handle", 2900)], "tongs-handle")).toBe("fired-twice"); // re-entered
+    expect(tallyTrial(held, "tongs-handle", 1).outcomes.correct).toBe(1);
+  });
+
   it("counts missed attempts and expected-zone confidence", () => {
     const events = [
       contact("tongs-tip", 1000, 0.9),

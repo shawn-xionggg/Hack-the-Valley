@@ -16,7 +16,13 @@ export function pointInPolygon(point: Point, polygon: Polygon): boolean {
 }
 
 const TARGETS: ContactTarget[] = ["peanut-source", "tongs-tip", "tongs-handle", "meal-1"];
-interface Dwell { entered: number; lastInside: number; frames: number; hits: number; fired: boolean }
+/** frames/hits count since entry, then since the last emission, so each re-fire reports its own window. */
+interface Dwell { entered: number; lastInside: number; frames: number; hits: number; lastFired: number | undefined }
+
+/** Marker tracking isn't built yet (spec v5 §4.6), so the tongs always use their calibrated fixed polygons. */
+export function fixedUtensilStatus(zones: ZoneLayout): VisionStatus["utensils"] {
+  return { tongs: { tracking: "fixed", parts: { "tongs-tip": zones["tongs-tip"], "tongs-handle": zones["tongs-handle"] }, lastSeenT: null } };
+}
 
 /** Converts normalized landmarks into the shared vision events; no exposure state lives here. */
 export function createTracker(
@@ -51,16 +57,22 @@ export function createTracker(
           continue;
         }
         if (!dwell && inside) {
-          dwell = { entered: t, lastInside: t, frames: 0, hits: 0, fired: false };
+          dwell = { entered: t, lastInside: t, frames: 0, hits: 0, lastFired: undefined };
           dwells.set(id, dwell);
         }
         if (!dwell) continue;
         dwell.frames++;
         if (inside) { dwell.hits++; dwell.lastInside = t; }
-        if (inside && !dwell.fired && t - dwell.entered >= tuning.contactDwellMs) {
-          dwell.fired = true;
+        // Re-fire while held: a grip that started clean must still pick up exposure that arrives later.
+        const due = dwell.lastFired === undefined
+          ? t - dwell.entered >= tuning.contactDwellMs
+          : t - dwell.lastFired >= tuning.heldContactRefireMs;
+        if (inside && due) {
           onEvent({ id: crypto.randomUUID(), t, kind: "contact", a: "hands", b: id,
             confidence: dwell.hits / dwell.frames, source: "camera" });
+          dwell.lastFired = t;
+          dwell.frames = 0;
+          dwell.hits = 0;
         }
       }
       const inWash = hands.some(hand => hand.some(p => pointInPolygon([p.x, p.y], zones["wash-station"])));
@@ -75,7 +87,8 @@ export function createTracker(
         }
       }
       return { t, handsVisible: hands.length, activeZones, fps,
-        washProgress: wash ? Math.min(1, (t - wash.entered) / tuning.washDwellMs) : 0 };
+        washProgress: wash ? Math.min(1, (t - wash.entered) / tuning.washDwellMs) : 0,
+        activeToolContacts: [], utensils: fixedUtensilStatus(zones) };
     },
   };
 }

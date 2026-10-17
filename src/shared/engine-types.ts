@@ -1,5 +1,5 @@
 // GhostTrace engine API and state shape — what the dashboard renders and what
-// the engine (Person 2) must implement. Spec: GhostTrace-summary-v4.md.
+// the engine (Person 2) must implement. Spec: GhostTrace-summary-v5.md.
 
 import type {
   Allergen,
@@ -78,7 +78,8 @@ export type LogEffect =
   | "no-change" // valid, but nothing new (e.g. clean hands touching a clean surface)
   | "ignored-low-confidence"
   | "ignored-duplicate-id"
-  | "ignored-unknown-alert";
+  | "ignored-unknown-alert"
+  | "ignored-invalid-contact"; // contact pair not allowed (tip↔handle, a === b, tool↔tool)
 
 export interface LoggedEvent {
   event: GhostEvent;
