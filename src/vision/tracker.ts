@@ -2,7 +2,7 @@ import { DEFAULT_TUNING } from "../shared/config";
 import type { ContactTarget, Polygon, ToolContactTarget, ToolSurface, Tuning, UtensilModels, ZoneLayout } from "../shared/config";
 import type { ContactEvent, UtensilPoseStatus, VisionStatus, WashEvent } from "../shared/events";
 import type { DetectedMarker } from "./aruco";
-import { pointInPolygon, pointPolygonDistance, polygonDistance } from "./geometry";
+import { pointInPolygon, pointPolygonDistance } from "./geometry";
 import { poseFromMarkers } from "./pose";
 import type { UtensilPose } from "./pose";
 
@@ -20,7 +20,6 @@ export interface MarkerObservation { markers: DetectedMarker[]; aspect: number }
 export const TOOL_ZONE_MARGIN = 0.6;
 
 const TARGETS: ContactTarget[] = ["peanut-source", "tongs-tip", "tongs-handle", "meal-1"];
-const TOOLS: ToolSurface[] = ["tongs-tip", "tongs-handle"];
 const TOOL_TARGETS: ToolContactTarget[] = ["peanut-source", "meal-1"];
 type Pair = { a: "hands"; b: ContactTarget } | { a: ToolSurface; b: ToolContactTarget };
 /** frames/hits count since entry, then since the last emission, so each re-fire reports its own window. */
@@ -31,12 +30,13 @@ export function fixedUtensilStatus(zones: ZoneLayout): VisionStatus["utensils"] 
   return { tongs: { tracking: "fixed", parts: { "tongs-tip": zones["tongs-tip"], "tongs-handle": zones["tongs-handle"] }, lastSeenT: null } };
 }
 
-/** Jaw ends for the tip (not the whole padded polygon); the handle counts if any of it is in. */
-function toolTouches(pose: UtensilPose, part: ToolSurface, target: Polygon, aspect: number): boolean {
+/**
+ * Jaw ends only (not the whole padded tip polygon). Amendment A2: the handle never acts in a tool contact,
+ * because from overhead a handle above the bowl during a normal scoop looks the same as one resting in it.
+ */
+function tipTouches(pose: UtensilPose, target: Polygon, aspect: number): boolean {
   const margin = TOOL_ZONE_MARGIN * pose.markerSide;
-  return part === "tongs-tip"
-    ? pose.tipContactPoints.some(p => pointPolygonDistance(p, target, aspect) <= margin)
-    : polygonDistance(pose.parts["tongs-handle"], target, aspect) <= margin;
+  return pose.tipContactPoints.some(p => pointPolygonDistance(p, target, aspect) <= margin);
 }
 
 /** Converts normalized landmarks and marker detections into the shared vision events; no exposure state lives here. */
@@ -125,10 +125,10 @@ export function createTracker(
       // Tool contacts only come from a tracked or held pose (invariant 9); confidence counts tracked frames.
       const activeToolContacts: VisionStatus["activeToolContacts"] = [];
       const current = tongs.tracking === "tracked" || tongs.tracking === "held" ? pose : undefined;
-      for (const a of TOOLS) for (const b of TOOL_TARGETS) {
-        const inside = !!current && toolTouches(current, a, zones[b], observation?.aspect ?? 1);
-        if (inside) activeToolContacts.push({ a, b });
-        step({ a, b }, inside, tongs.tracking === "tracked", t);
+      for (const b of TOOL_TARGETS) {
+        const inside = !!current && tipTouches(current, zones[b], observation?.aspect ?? 1);
+        if (inside) activeToolContacts.push({ a: "tongs-tip", b });
+        step({ a: "tongs-tip", b }, inside, tongs.tracking === "tracked", t);
       }
 
       const inWash = hands.some(hand => hand.some(p => pointInPolygon([p.x, p.y], zones["wash-station"])));
