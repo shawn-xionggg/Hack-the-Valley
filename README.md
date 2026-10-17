@@ -41,4 +41,14 @@ npm.cmd run build
 npm.cmd run preview
 ```
 
+### Rig trials
+
+Click **Clear log**, run one set of attempts (for example 20 tong-tip touches, pausing at least 1.5 s between them), then click **Export JSON**. Tally one or more exports:
+
+```sh
+npm run tally -- --expect tongs-tip --attempts 20 trials/tip-1.json
+```
+
+`--expect` takes a contact zone, `wash`, or `none` (attempts that should produce no event, such as brushing past the wash station). Events less than `--gap` ms apart (default 1500) count as one attempt. The output is a Markdown table of correct, fired-twice, wrong-tong-part, unexpected and missed attempts, plus contact confidence.
+
 Tests cover polygon containment, contact dwell and rearming, camera stalls, calibration changes, tong-zone ambiguity, and wash timing. A physical webcam check is still needed on the target laptop/browser.
