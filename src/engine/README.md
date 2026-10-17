@@ -58,3 +58,23 @@ as unavailable on failure, not present a shortened path as complete.
 Cleared exposure records remain traceable. This milestone reconstructs origins
 and transfers only; insertion of wash steps will accompany wash handling.
 Alerts and the full engine dispatcher remain separate work.
+
+## Two-marker tong tracking (A1)
+
+Markers 11 and 12 identify alternative views of the same utensil. CV chooses a
+calibrated view and emits contacts using `tongs-tip` or `tongs-handle`; the registry
+never creates marker-number surfaces. Switching visible markers or losing tracking
+does not clear exposure. Pose selection, calibration, and tracking-loss display
+belong to CV/dashboard; this engine does not inspect camera frames or marker IDs.
+
+Contact processing checks duplicate IDs first, then validates the pair, then
+checks confidence. Hands may touch any shared contact target; a tong part may
+touch only peanut-source or meal-1. Invalid pairs are logged as
+`ignored-invalid-contact` without changing exposure. This guard checks pairs,
+not the entire untyped event payload.
+
+Fresh IDs from held contacts can transfer newly arrived exposure; repeated IDs
+are ignored and already-active exposure is not duplicated. Tests cover tool-only
+chains, reverse transfers, handle-to-hand re-exposure, forbidden pairs, confidence,
+and continuity of logical IDs. Actual marker switching still needs CV integration
+tests. Shared types, registry IDs, and chain reconstruction remain unchanged.
