@@ -1,1 +1,0 @@
-export { createObjectRegistry } from "./registry";
