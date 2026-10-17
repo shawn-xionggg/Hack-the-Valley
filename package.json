@@ -8,7 +8,8 @@
     "typecheck": "tsc --noEmit",
     "build": "npm run typecheck && vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "test": "vitest run"
+    "test": "vitest run",
+    "demo:registry": "tsx src/engine/demo.ts"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "0.10.22-rc.20250304"
@@ -16,6 +17,7 @@
   "devDependencies": {
     "typescript": "~5.8.3",
     "vite": "^6.4.4",
-    "vitest": "^5.0.5"
+    "vitest": "^5.0.5",
+    "tsx": "^4.20.6"
   }
 }
