@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Polygon, ZoneLayout } from "../shared/config";
-import { isSimplePolygon, overlappingZones, polygonArea, polygonsOverlap, segmentsIntersect, validatePolygon } from "./geometry";
+import { isSimplePolygon, overlappingZones, parseZoneLayout, polygonArea, polygonsOverlap, segmentsIntersect, validatePolygon } from "./geometry";
 
 const square: Polygon = [[0.1, 0.1], [0.4, 0.1], [0.4, 0.4], [0.1, 0.4]];
 const bowtie: Polygon = [[0.1, 0.1], [0.4, 0.4], [0.4, 0.1], [0.1, 0.4]];
@@ -56,5 +56,20 @@ describe("calibration geometry", () => {
     expect(validatePolygon(bowtie)).toMatch(/cross/); // crossing wins over its near-zero area
     expect(validatePolygon([[0.1, 0.1], [0.11, 0.1], [0.11, 0.11], [0.1, 0.11]])).toMatch(/too small/); // 0.0001
     expect(validatePolygon([[0, 0], [1, 0], [1, 0.9], [0, 0.9]])).toMatch(/half the frame/);
+  });
+});
+
+describe("parseZoneLayout", () => {
+  const layout: ZoneLayout = { "peanut-source": square, "tongs-tip": [], "tongs-handle": [], "meal-1": shift(square, 0.5, 0), "wash-station": [] };
+
+  it("accepts a stored layout, with empty polygons as unset zones", () => {
+    expect(parseZoneLayout(JSON.parse(JSON.stringify(layout)))).toEqual(layout);
+  });
+
+  it("rejects missing zones, short polygons and out-of-frame points", () => {
+    expect(parseZoneLayout(null)).toBeNull();
+    expect(parseZoneLayout({ ...layout, "wash-station": undefined })).toBeNull();
+    expect(parseZoneLayout({ ...layout, "meal-1": [[0.1, 0.1], [0.2, 0.2]] })).toBeNull();
+    expect(parseZoneLayout({ ...layout, "meal-1": shift(square, 0.7, 0) })).toBeNull();
   });
 });
