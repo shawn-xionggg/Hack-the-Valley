@@ -8,13 +8,14 @@ import type {
   MealId,
   Order,
   Tuning,
+  UtensilId,
 } from "./config";
 import type { GhostEvent, WashMethod } from "./events";
 
 /**
  * "no-tracked-exposure": the engine has recorded no potential exposure on this surface
- *   since the session started or since its last reset (wash for hands, replacement for a
- *   utensil). It does NOT mean safe or clean.
+ *   since the session started or since its last reset (wash for hands, replacement or
+ *   utensil wash for a utensil). It does NOT mean safe or clean.
  * "potential-exposure": at least one allergen may have reached this surface through
  *   observed contacts.
  * "action-required": a meal has potential exposure to an allergen its order declares.
@@ -36,7 +37,7 @@ export interface ExposureRecord {
   /** The record on fromSurfaceId that was active at the time (provenance pointer); null for origins. */
   parentRecordId: string | null;
   t: number;
-  /** Wash or utensil-replaced event that cleared it; null while active. */
+  /** Wash, utensil-washed or utensil-replaced event that cleared it; null while active. */
   clearedByEventId: string | null;
 }
 
@@ -94,6 +95,8 @@ export interface EngineState {
   log: LoggedEvent[];
   /** Method of the most recent wash, for the "Hands washed (detected, not verified)" label. */
   lastWash: { eventId: string; method: WashMethod; t: number } | null;
+  /** A3: the most recent utensil wash, for the "Tongs washed (detected, not verified)" label. */
+  lastUtensilWash: { eventId: string; utensilId: UtensilId; method: "zone-dwell"; t: number } | null;
 }
 
 export interface EngineOptions {

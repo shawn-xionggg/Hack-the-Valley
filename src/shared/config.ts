@@ -72,7 +72,7 @@ export const SURFACES: Record<ObjectId, TrackedSurface> = {
   "wash-station": {
     id: "wash-station",
     kind: "wash-station",
-    label: "Wash station (wet wipes)",
+    label: "Sink (simulated)", // A3: a marked sink prop replaced the wet-wipe station; the id is unchanged
     initialAllergens: [],
   },
 };
@@ -142,6 +142,8 @@ export interface Tuning {
   utensilHoldMs: number;
   /** While a contact pair stays occupied, emit a fresh contact this often. */
   heldContactRefireMs: number;
+  /** A3: lost-tracking gap a utensil-wash dwell tolerates; tracked and held frames never count as gaps. */
+  utensilWashGapMs: number;
 }
 
 export const DEFAULT_TUNING: Tuning = {
@@ -152,4 +154,5 @@ export const DEFAULT_TUNING: Tuning = {
   fingertipLandmarks: [4, 8, 12, 16, 20], // thumb, index, middle, ring, pinky tips
   utensilHoldMs: 500,
   heldContactRefireMs: 1000,
+  utensilWashGapMs: 1500, // A3: tune on the rig
 };

@@ -34,6 +34,8 @@ export const WASH_METHODS: Record<WashMethod, string> = {
 };
 
 export const WASH_LABEL = "Hands washed (detected, not verified)";
+/** A3: shown for a utensil wash at the sink. */
+export const UTENSIL_WASH_LABEL = "Tongs washed (detected, not verified)";
 
 /** Badges on the tip and handle cards. Tracked and held need none: the cards' statuses are live. */
 export const TRACKING_NOTES: Partial<Record<UtensilTracking, string>> = {
@@ -97,6 +99,8 @@ export function eventText({ event }: LoggedEvent): string {
       return `${SURFACE_LABELS[event.a]} ↔ ${SURFACE_LABELS[event.b]} · ${Math.round(event.confidence * 100)}%`;
     case "wash":
       return washText(event.method);
+    case "utensil-washed":
+      return `${UTENSIL_WASH_LABEL} · ${WASH_METHODS[event.method]}`;
     case "utensil-replaced-confirmed":
       return "Tongs replaced (confirmed by staff)";
     case "alert-acknowledged":

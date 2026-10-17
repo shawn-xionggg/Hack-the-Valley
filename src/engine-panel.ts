@@ -6,7 +6,7 @@ import { createEngine } from "./engine";
 import { ORDERS } from "./shared/config";
 import type { ExposableSurfaceId, ToolSurface } from "./shared/config";
 import type { Alert, ChainStep, EngineState, LoggedEvent, SurfaceStatus } from "./shared/engine-types";
-import type { ContactEvent, GhostEvent, UtensilTracking, WashEvent, WashMethod } from "./shared/events";
+import type { ContactEvent, GhostEvent, UtensilTracking, UtensilWashedEvent, WashEvent, WashMethod } from "./shared/events";
 import { DEMO_SCRIPT, MOVING_TONGS_SCRIPT } from "./sim/fixtures";
 
 const CARDS: ExposableSurfaceId[] = ["hands", "peanut-source", "tongs-tip", "tongs-handle", "meal-1"];
@@ -51,6 +51,7 @@ function chainText(step: ChainStep): string {
 function eventText({ event, effect }: LoggedEvent): string {
   const what = event.kind === "contact" ? `${LABELS[event.a]} ↔ ${LABELS[event.b]} (${Math.round(event.confidence * 100)}%)`
     : event.kind === "wash" ? `Hands washed · ${WASH_METHODS[event.method]}`
+    : event.kind === "utensil-washed" ? "Tongs washed · zone dwell"
     : event.kind === "utensil-replaced-confirmed" ? "Tongs replaced (confirmed)"
     : event.kind === "alert-acknowledged" ? "Alert acknowledged"
     : "Session reset";
@@ -76,7 +77,7 @@ function chime() {
 
 export interface EnginePanel {
   /** Feed every camera contact/wash here. Ignored while a simulated replay owns the session. */
-  onVisionEvent(event: ContactEvent | WashEvent): void;
+  onVisionEvent(event: ContactEvent | WashEvent | UtensilWashedEvent): void;
   /** Current tong tracking state, or null while the camera is off. */
   setTracking(tracking: UtensilTracking | null): void;
 }

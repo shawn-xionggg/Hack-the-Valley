@@ -42,6 +42,12 @@ export class ScriptBuilder {
     return this;
   }
 
+  /** A3: vision always sends this directly after a wash from the same sink dwell, so scripts should too. */
+  utensilWash(utensilId: UtensilId = "tongs"): this {
+    this.events.push({ kind: "utensil-washed", utensilId, method: "zone-dwell", source: "sim", verified: false, ...this.next() });
+    return this;
+  }
+
   replace(utensilId: UtensilId = "tongs"): this {
     this.events.push({ kind: "utensil-replaced-confirmed", utensilId, source: "sim", ...this.next() });
     return this;
@@ -126,7 +132,7 @@ export const DEMO_SCRIPT: Scenario = {
   events: new ScriptBuilder()
     .contact("peanut-source") // judge touches peanut source
     .contact("tongs-tip") // judge touches tong tips
-    .wash("zone-dwell") // judge wipes hands at wash station
+    .wash("zone-dwell") // judge washes hands at the sink; the tongs stay at the rest spot
     .contact("tongs-handle") // judge grips handle (only ever touched by clean hands)
     .contact("tongs-tip") // judge touches tips again
     .contact("meal-1") // judge touches Order #4's meal → ALERT
@@ -254,6 +260,36 @@ export const SCENARIOS: Scenario[] = [
       .replace("tongs")
       .toolContact("tongs-tip", "meal-1").events,
     final: { statuses: s(N, N, N, N), alertCount: 0 },
+  },
+  // A3: the sink washes hands and tongs together.
+  {
+    name: "15. A sink wash with the tongs clears hands, tip and handle",
+    events: new ScriptBuilder()
+      .contact("peanut-source")
+      .contact("tongs-tip")
+      .contact("tongs-handle")
+      .wash() // vision sends the hand wash first…
+      .utensilWash() // …then the utensil wash from the same dwell
+      .contact("tongs-handle") // the grip's re-fires after the wash change nothing
+      .contact("tongs-tip").events,
+    afterEach: [null, null, null, { statuses: s(N, P, P, N) }, { statuses: s(N, N, N, N) }, null, null],
+    final: { statuses: s(N, N, N, N), alertCount: 0 },
+  },
+  {
+    name: "16. A utensil wash alone leaves the hands, which re-expose the tips (why vision always pairs it)",
+    events: new ScriptBuilder().contact("peanut-source").contact("tongs-tip").utensilWash().contact("tongs-tip").events,
+    afterEach: [null, null, { statuses: s(P, N, N, N) }, null],
+    final: { statuses: s(P, P, N, N), alertCount: 0 },
+  },
+  {
+    name: "17. Washing never clears the meal or its alert",
+    events: new ScriptBuilder()
+      .contact("tongs-handle")
+      .toolContact("tongs-tip", "peanut-source")
+      .toolContact("tongs-tip", "meal-1") // ALERT
+      .wash()
+      .utensilWash().events,
+    final: { statuses: s(N, N, N, A), alertCount: 1, alertAcknowledged: false, chain: MOVING_CHAIN },
   },
 ];
 

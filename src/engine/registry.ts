@@ -48,5 +48,6 @@ export function createObjectRegistry(sessionId: string): EngineState {
     alerts: [],
     log: [],
     lastWash: null,
+    lastUtensilWash: null,
   };
 }
