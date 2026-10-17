@@ -18,10 +18,8 @@ npm.cmd run demo:registry
 Tests cover initial records and statuses, isolation between surfaces and sessions,
 unchanged shared configuration, reproducibility, and invalid session IDs.
 
-Registry initialization and contact transfer are implemented. Wash and
-replacement handling, alerts, subscriptions, and `createEngine` are not yet
-implemented. The ten scenarios in `src/sim/fixtures.ts` will exercise that engine
-in the next milestone. No tracked exposure is not a safety guarantee.
+Registry initialization, contact transfer, and `createEngine` (below) are
+implemented. No tracked exposure is not a safety guarantee.
 
 ## Contact propagation
 
@@ -78,3 +76,21 @@ are ignored and already-active exposure is not duplicated. Tests cover tool-only
 chains, reverse transfers, handle-to-hand re-exposure, forbidden pairs, confidence,
 and continuity of logical IDs. Actual marker switching still needs CV integration
 tests. Shared types, registry IDs, and chain reconstruction remain unchanged.
+
+## Engine (`createEngine`)
+
+`createEngine({ orders?, tuning? })` in `engine.ts` implements the shared `Engine`
+API on top of the registry, `applyContact` and `buildExposureChain`. `dispatch`
+checks duplicate IDs across every event kind first, then applies spec §3.5:
+contacts (through `applyContact`), washes (hands only), utensil replacement (tip
+and handle together), acknowledgements (alert only), and session reset (fresh
+registry, new deterministic session ID `session-N`). After each applied contact it
+raises at most one `alert:<mealId>:<allergen>` per meal and allergen; the alert
+chain is the recorded ancestry plus every wash that cleared a record on that path,
+origin first, then by time. Surface statuses are rebuilt from records and alerts
+after every event, so a meal with an alert stays `action-required` until reset.
+
+Every dispatch returns a new state object and notifies subscribers. It never
+throws: malformed events are logged as `no-change` or skipped, and a failing
+listener is reported to the console. `engine.test.ts` runs all fifteen
+`SCENARIOS` from `src/sim/fixtures.ts`, including per-step statuses and chains.
