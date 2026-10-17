@@ -1,8 +1,8 @@
 // GhostTrace test fixtures and the canonical demo script.
 // Used by: engine unit tests (Person 2), SIMULATED mode (Person 3), and as the
-// executable definition of the demo. Spec: GhostTrace-summary-v4.md.
+// executable definition of the demo. Spec: GhostTrace-summary-v5.md.
 
-import type { ContactTarget, ExposableSurfaceId, Order, UtensilId } from "../shared/config";
+import type { ContactTarget, ExposableSurfaceId, Order, ToolContactTarget, ToolSurface, UtensilId } from "../shared/config";
 import { ORDERS } from "../shared/config";
 import type { ChainStep, SurfaceStatus } from "../shared/engine-types";
 import type { GhostEvent, WashMethod } from "../shared/events";
@@ -22,6 +22,18 @@ export class ScriptBuilder {
 
   contact(b: ContactTarget, confidence = 1): this {
     this.events.push({ kind: "contact", a: "hands", b, confidence, source: "sim", ...this.next() });
+    return this;
+  }
+
+  /** A tracked tong part touched a static target (tips in the peanuts, tips on the plate). */
+  toolContact(a: ToolSurface, b: ToolContactTarget, confidence = 1): this {
+    this.events.push({ kind: "contact", a, b, confidence, source: "sim", ...this.next() });
+    return this;
+  }
+
+  /** A pair the contract forbids (e.g. tip↔handle), cast past the types to test the engine guard. */
+  invalidContact(a: ExposableSurfaceId, b: ExposableSurfaceId): this {
+    this.events.push({ kind: "contact", a, b, confidence: 1, source: "sim", ...this.next() } as unknown as GhostEvent);
     return this;
   }
 
@@ -131,6 +143,27 @@ export const DEMO_SCRIPT: Scenario = {
   final: { statuses: s(P, P, N, A), alertCount: 1, alertAcknowledged: true, chain: DEMO_CHAIN },
 };
 
+const MOVING_CHAIN = ["origin:peanut-source", "peanut-source>tongs-tip", "tongs-tip>meal-1"];
+
+// ---------------------------------------------------------------------------
+// Act 2 (moving tongs, after a session reset): the hands never touch a peanut.
+// ---------------------------------------------------------------------------
+export const MOVING_TONGS_SCRIPT: Scenario = {
+  name: "10. Moving tongs: tips carry peanut to the meal without the hands",
+  events: new ScriptBuilder()
+    .contact("tongs-handle") // judge picks up the tongs by the handle (clean hands)
+    .toolContact("tongs-tip", "peanut-source") // dips the tips into the peanuts
+    .toolContact("tongs-tip", "meal-1") // serves onto Order #4's plate → ALERT
+    .ack(alertId("meal-1", "peanut")).events, // judge acknowledges
+  afterEach: [
+    { statuses: s(N, N, N, N), alertCount: 0 },
+    { statuses: s(N, P, N, N), alertCount: 0 },
+    { statuses: s(N, P, N, A), alertCount: 1, alertAcknowledged: false, chain: MOVING_CHAIN },
+    { statuses: s(N, P, N, A), alertCount: 1, alertAcknowledged: true },
+  ],
+  final: { statuses: s(N, P, N, A), alertCount: 1, alertAcknowledged: true, chain: MOVING_CHAIN },
+};
+
 export const SCENARIOS: Scenario[] = [
   DEMO_SCRIPT,
   {
@@ -194,6 +227,32 @@ export const SCENARIOS: Scenario[] = [
   {
     name: "9. Session reset clears everything",
     events: new ScriptBuilder().contact("peanut-source").contact("meal-1").reset().events,
+    final: { statuses: s(N, N, N, N), alertCount: 0 },
+  },
+  MOVING_TONGS_SCRIPT,
+  {
+    name: "11. Tool contacts never leak tip to handle",
+    events: new ScriptBuilder().toolContact("tongs-tip", "peanut-source").contact("tongs-handle").events,
+    final: { statuses: s(N, P, N, N), alertCount: 0 },
+  },
+  {
+    name: "12. A handle resting in the peanuts exposes the hands that grip it",
+    events: new ScriptBuilder().toolContact("tongs-handle", "peanut-source").contact("tongs-handle").events,
+    final: { statuses: s(P, N, P, N), alertCount: 0 },
+  },
+  {
+    name: "13. Invalid contact pairs are ignored",
+    events: new ScriptBuilder()
+      .toolContact("tongs-tip", "peanut-source")
+      .invalidContact("tongs-tip", "tongs-handle").events, // logged ignored-invalid-contact
+    final: { statuses: s(N, P, N, N), alertCount: 0 },
+  },
+  {
+    name: "14. Replacement clears exposure carried by the tongs alone",
+    events: new ScriptBuilder()
+      .toolContact("tongs-tip", "peanut-source")
+      .replace("tongs")
+      .toolContact("tongs-tip", "meal-1").events,
     final: { statuses: s(N, N, N, N), alertCount: 0 },
   },
 ];
