@@ -3,6 +3,12 @@ import type { ExposableSurfaceId } from "../shared/config";
 import type { EngineState, ExposureRecord, LogEffect } from "../shared/engine-types";
 import type { ContactEvent } from "../shared/events";
 
+/** Runtime counterpart of ContactPair; marker numbers never identify exposure surfaces. */
+function isAllowedPair(a: unknown, b: unknown): boolean {
+  const staticTarget = b === "peanut-source" || b === "meal-1";
+  return (a === "hands" && (staticTarget || b === "tongs-tip" || b === "tongs-handle")) ||
+    ((a === "tongs-tip" || a === "tongs-handle") && staticTarget);
+}
 /** Contact-only reducer. Inputs must satisfy the shared contract; alerts and interventions are separate steps. */
 export function applyContact(
   state: EngineState,
@@ -19,6 +25,7 @@ export function applyContact(
   if (state.log.some(entry => entry.event.id === event.id)) {
     return log("ignored-duplicate-id");
   }
+  if (!isAllowedPair(event.a, event.b)) return log("ignored-invalid-contact");
   if (event.confidence < minConfidence) return log("ignored-low-confidence");
 
   // Snapshot both sides before either transfer: no same-contact feedback loops.
