@@ -380,3 +380,75 @@ describe("utensil wash (A3)", () => {
     expect(washes(events)).toEqual(["wash@10000", "utensil-washed@10000"]);
   });
 });
+
+// Height gate (spec A4 §4.4). The tag at the centre is 0.05 high with its jaw end in the peanuts at x 0.3.
+// A tag 0.06 high (20% bigger: closer to the camera) still has its jaw end in the peanuts, at x 0.26.
+const touched = (sides: Partial<Record<"peanut-source" | "meal-1", number>>, markerId = 11): UtensilMarkerModel =>
+  ({ ...tongModel(markerId), touchSides: sides });
+const lifted = () => seen(tag(11, 0.5, 0.5, 0.06));
+const resting = () => seen(tag(11));
+const contacts = (events: Emitted[]) => events.flatMap(e => e.kind === "contact" ? [`${e.a}>${e.b}@${e.t}`] : []);
+
+describe("height gate (A4)", () => {
+  it("fires at the touch reference, and up to toolContactSideMargin above it", () => {
+    for (const side of [0.05, 0.053]) {
+      const events: Emitted[] = [];
+      const tracker = createTracker(table(), event => events.push(event), {}, models(touched({ "peanut-source": 0.05 })));
+      frames(tracker, 0, 400, [], () => seen(tag(11, 0.5, 0.5, side)));
+      expect(contacts(events)).toEqual(["tongs-tip>peanut-source@400"]);
+    }
+  });
+
+  it("treats a carry above the margin as a pass: no contact, nothing active", () => {
+    const events: Emitted[] = [];
+    const tracker = createTracker(table(), event => events.push(event), {}, models(touched({ "peanut-source": 0.05 })));
+    expect(frames(tracker, 0, 1500, [], lifted).activeToolContacts).toEqual([]);
+    expect(events).toEqual([]);
+  });
+
+  it("starts a fresh dwell when a carry descends into a touch", () => {
+    const events: Emitted[] = [];
+    const tracker = createTracker(table(), event => events.push(event), {}, models(touched({ "peanut-source": 0.05 })));
+    frames(tracker, 0, 700, [], lifted);
+    frames(tracker, 800, 1200, [], resting);
+    expect(contacts(events)).toEqual(["tongs-tip>peanut-source@1200"]);
+  });
+
+  it("reuses the last side while held", () => {
+    const events: Emitted[] = [];
+    const tracker = createTracker(table(), event => events.push(event), {}, models(touched({ "peanut-source": 0.05 })));
+    frames(tracker, 0, 100, [], lifted);
+    frames(tracker, 200, 500, [], () => seen()); // held: the lifted pose, still gated
+    expect(events).toEqual([]);
+  });
+
+  it("gates nothing without a reference for that target", () => {
+    const events: Emitted[] = [];
+    const tracker = createTracker(table(), event => events.push(event), {}, models(touched({ "meal-1": 0.05 })));
+    frames(tracker, 0, 400, [], lifted);
+    expect(contacts(events)).toEqual(["tongs-tip>peanut-source@400"]);
+  });
+
+  it("never gates one face with the other face's references", () => {
+    const events: Emitted[] = [];
+    const tracker = createTracker(table(), event => events.push(event), {},
+      models(touched({ "peanut-source": 0.04 }, 11), tongModel(12)));
+    frames(tracker, 0, 400, [], () => seen(tag(12, 0.5, 0.5, 0.06)));
+    expect(contacts(events)).toEqual(["tongs-tip>peanut-source@400"]);
+  });
+
+  it("leaves fingertip contacts ungated", () => {
+    const events: Emitted[] = [];
+    const tracker = createTracker(table(), event => events.push(event), {}, models(touched({ "peanut-source": 0.05 })));
+    frames(tracker, 0, 400, [handAt(0.27, 0.46)], lifted); // in the peanuts, outside the lifted tip polygon
+    expect(contacts(events)).toEqual(["hands>peanut-source@400"]);
+  });
+
+  it("leaves the A3 sink dwell ungated", () => {
+    const events: Emitted[] = [];
+    const sides = { "peanut-source": 0.05, "meal-1": 0.05 };
+    const tracker = createTracker(sinkTable(), event => events.push(event), {}, models(touched(sides)));
+    frames(tracker, 0, 6000, [washingHand], lifted);
+    expect(washes(events)).toEqual(["wash@6000", "utensil-washed@6000"]);
+  });
+});

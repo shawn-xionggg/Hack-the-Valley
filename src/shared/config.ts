@@ -100,6 +100,13 @@ export interface UtensilMarkerModel {
   parts: Record<ToolSurface, Polygon>;
   /** Jaw ends. Tool contacts test only these points, not the whole tip polygon. */
   tipContactPoints: Point[];
+  /**
+   * A4: touch references. This marker's mean side (in units of frame height, as vision measures its pose)
+   * recorded while the jaw ends rested on each target. A tool contact with a target counts only frames where
+   * the side is at most (1 + Tuning.toolContactSideMargin) × its reference: a bigger marker is closer to the
+   * camera. A target with no reference has no height gate (hover counts, as before A4).
+   */
+  touchSides?: Partial<Record<ToolContactTarget, number>>;
 }
 
 /**
@@ -144,6 +151,11 @@ export interface Tuning {
   heldContactRefireMs: number;
   /** A3: lost-tracking gap a utensil-wash dwell tolerates; tracked and held frames never count as gaps. */
   utensilWashGapMs: number;
+  /**
+   * A4: height gate. A jaw end counts as inside a target only while the marker's side is at most (1 + this) ×
+   * its touch reference for that target. 0.08 ≈ 4–5 cm above the touch height with the camera ~65 cm up.
+   */
+  toolContactSideMargin: number;
 }
 
 export const DEFAULT_TUNING: Tuning = {
@@ -155,4 +167,5 @@ export const DEFAULT_TUNING: Tuning = {
   utensilHoldMs: 500,
   heldContactRefireMs: 1000,
   utensilWashGapMs: 1500, // A3: tune on the rig
+  toolContactSideMargin: 0.08, // A4: tune 0.06–0.12 on the rig (G1–G4)
 };

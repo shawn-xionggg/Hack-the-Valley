@@ -1,4 +1,4 @@
-import type { Point, Polygon, ToolSurface, UtensilMarkerModel, UtensilModel, UtensilModels } from "../shared/config";
+import type { Point, Polygon, ToolContactTarget, ToolSurface, UtensilMarkerModel, UtensilModel, UtensilModels } from "../shared/config";
 import type { DetectedMarker } from "./aruco";
 import { polygonArea } from "./geometry";
 
@@ -10,6 +10,7 @@ import { polygonArea } from "./geometry";
 export type Homography = readonly number[];
 
 const TOOL_PARTS: readonly ToolSurface[] = ["tongs-tip", "tongs-handle"];
+const TOOL_TARGETS: readonly ToolContactTarget[] = ["peanut-source", "meal-1"];
 
 /** Maps marker-local points to normalized raw-frame points. Null for a degenerate quad. */
 export function markerHomography(corners: readonly Point[]): Homography | null {
@@ -82,8 +83,10 @@ export interface UtensilPose {
   markerId: number;
   parts: Record<ToolSurface, Polygon>;
   tipContactPoints: Point[];
-  /** Mean marker side in units of frame height: the scale for growing tool-contact zones. */
+  /** Mean marker side in units of frame height: the scale for growing tool-contact zones, and the A4 height. */
   markerSide: number;
+  /** A4: the placing face's touch references, in the same units as `markerSide`. Empty means no height gate. */
+  touchSides: Partial<Record<ToolContactTarget, number>>;
 }
 
 /**
@@ -110,7 +113,8 @@ export function poseFromMarkers(markers: readonly DetectedMarker[], model: Utens
     const [nx, ny] = corners[(i + 1) % 4]!;
     return sum + Math.hypot((nx - x) * aspect, ny - y);
   }, 0) / 4;
-  return { markerId: best.entry.markerId, parts: { "tongs-tip": tip, "tongs-handle": handle }, tipContactPoints: points, markerSide };
+  return { markerId: best.entry.markerId, parts: { "tongs-tip": tip, "tongs-handle": handle }, tipContactPoints: points, markerSide,
+    touchSides: best.entry.touchSides ?? {} };
 }
 
 const isPoint = (value: unknown): value is Point =>
@@ -126,6 +130,21 @@ function isMarkerModel(value: unknown): value is UtensilMarkerModel {
     tipContactPoints.every(isPoint);
 }
 
+/**
+ * A4: keeps only positive finite touch references. A malformed one is dropped on its own, which leaves that
+ * target ungated (hover counts), and never drops the marker.
+ */
+function withValidTouchSides(entry: UtensilMarkerModel): UtensilMarkerModel {
+  const { touchSides, ...rest } = entry;
+  const raw: unknown = touchSides;
+  if (!raw || typeof raw !== "object") return rest;
+  const valid = TOOL_TARGETS.flatMap(target => {
+    const side = (raw as Record<string, unknown>)[target];
+    return typeof side === "number" && Number.isFinite(side) && side > 0 ? [[target, side] as const] : [];
+  });
+  return valid.length ? { ...rest, touchSides: Object.fromEntries(valid) } : rest;
+}
+
 /** Reads stored models (ghosttrace.utensils.v2). Anything malformed is dropped, which leaves the tongs "fixed". */
 export function parseUtensilModels(value: unknown): UtensilModels {
   if (!value || typeof value !== "object") return {};
@@ -134,6 +153,6 @@ export function parseUtensilModels(value: unknown): UtensilModels {
   const markers = (tongs as Record<string, unknown>).markers;
   if (!Array.isArray(markers)) return {};
   // One entry per marker ID: the last calibration wins.
-  const byId = new Map(markers.filter(isMarkerModel).map(entry => [entry.markerId, entry]));
+  const byId = new Map(markers.filter(isMarkerModel).map(entry => [entry.markerId, withValidTouchSides(entry)]));
   return byId.size ? { tongs: { markers: [...byId.values()] } } : {};
 }

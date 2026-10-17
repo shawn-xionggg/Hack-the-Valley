@@ -1,6 +1,6 @@
 import "./style.css";
 import { SURFACES, UTENSIL_MODELS_STORAGE_KEY, ZONE_LAYOUT_STORAGE_KEY } from "./shared/config";
-import type { Point, Polygon, ToolSurface, UtensilModels, ZoneLayout, ZonedObjectId } from "./shared/config";
+import type { Point, Polygon, ToolContactTarget, ToolSurface, UtensilModels, ZoneLayout, ZonedObjectId } from "./shared/config";
 import type { ContactEvent, UtensilWashedEvent, VisionStatus, WashEvent } from "./shared/events";
 import type { VisionHandle } from "./shared/vision-types";
 import type { HandLandmarkerResult } from "@mediapipe/tasks-vision";
@@ -8,7 +8,9 @@ import { startVision } from "./vision";
 import { mountEnginePanel } from "./engine-panel";
 import { overlappingZones, parseZoneLayout, polygonsOverlap, validatePolygon } from "./vision/geometry";
 import { fixedUtensilStatus } from "./vision/tracker";
-import { calibrateMarker, parseUtensilModels } from "./vision/pose";
+import { calibrateMarker, parseUtensilModels, poseFromMarkers } from "./vision/pose";
+import { addTouchFrame, createTouchCapture } from "./vision/touch";
+import type { TouchCapture } from "./vision/touch";
 import {
   GO_NO_GO_RATE, MIN_MARKER_SIDE_PX, TONG_MARKER_IDS, createMarkerSvg, createMarkerTrial, createTongMarkerSheet,
   drawMarkerBoxes, markerSidePx, recordMarkerFrame,
@@ -64,6 +66,8 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
           <div class="status-row"><span>Tong tracking</span><span id="tong-tracking">—</span></div>
           <div class="status-row"><span>Calibrated faces</span><span id="calibrated-faces">None</span></div>
           <div class="zone-actions">${TONG_MARKER_IDS.map(id => `<button class="text-button" data-calibrate="${id}" disabled>Calibrate ID ${id}</button>`).join("")}<button class="text-button" id="clear-calibration">Clear calibration</button></div>
+          <div class="status-row"><span>Touch heights</span><span id="touch-refs">None</span></div>
+          <div class="zone-actions"><button class="text-button" data-touch="meal-1" disabled>Record plate touch</button><button class="text-button" data-touch="peanut-source" disabled>Record peanut touch</button></div>
           <p class="hint" id="calibration-help"></p>
           <div class="zone-actions"><button class="text-button" id="print-markers">Print tong markers 11 + 12</button><button class="text-button" id="download-marker">Download test marker #0</button></div>
           <p class="hint">The tong sheet prints IDs 11 and 12 at 25 mm and 30 mm (OpenCV 4×4 / 50). Print at 100% and check its 50 mm bar.</p>
@@ -114,6 +118,10 @@ let selectedZone: ZonedObjectId | undefined;
  */
 type CalibrationStep = ToolSurface | "jaws";
 let calibration: { markerId: number; corners: Point[]; step: CalibrationStep; parts: Partial<Record<ToolSurface, Polygon>> } | undefined;
+/** A4 touch-reference capture in progress, fed from onMarkers. */
+let touchCapture: TouchCapture | undefined;
+const TOUCH_TARGETS: ToolContactTarget[] = ["meal-1", "peanut-source"];
+const TOUCH_LABELS: Record<ToolContactTarget, string> = { "meal-1": "plate", "peanut-source": "peanut" };
 /** Vertices placed so far for the selected zone or calibration step, in raw normalized coordinates. */
 let draft: Point[] = [];
 let cursor: Point | undefined;
@@ -121,7 +129,7 @@ const CLOSE_RADIUS_PX = 12; // clicking this close to the first vertex closes th
 const MIN_VERTEX_GAP_PX = 6; // clicks this close to the previous vertex are ignored (double-clicks)
 const DRAW_HELP = "Click to place corners. Click the first corner or press Enter to finish · Backspace undoes · Esc cancels.";
 const IDLE_HELP = "Zones are saved on this device. Recalibrate after moving the camera or switching cameras.";
-const CALIBRATION_IDLE_HELP = "Lay the tongs flat and closed with one marker face up, then calibrate that face. Repeat with the tongs flipped. Keep them still while you draw.";
+const CALIBRATION_IDLE_HELP = "Lay the tongs flat and closed with one marker face up, then calibrate that face. Repeat with the tongs flipped. Keep them still while you draw. Optional height gate: with each face up, rest the jaw ends on the plate and record, then in the peanuts. Recalibrating a face clears its touches.";
 const CALIBRATION_STEPS: Record<CalibrationStep, string> = {
   "tongs-tip": `Outline the tong tips. Pad the outline past the jaws so open jaws stay inside. ${DRAW_HELP}`,
   "tongs-handle": `Outline the handle, leaving a gap over the hinge. ${DRAW_HELP}`,
@@ -310,12 +318,61 @@ function logEvent(event: ContactEvent | WashEvent | UtensilWashedEvent) {
 function onMarkers(next: DetectedMarker[], frame: { width: number; height: number; ms: number }) {
   markers = next;
   // Side length is what decides whether a tag is big enough (§4.4: ≥ 30 px).
+  const aspect = frame.width / frame.height;
   el("marker-status").textContent = next.length ? next.map(m => {
     const side = Math.round(markerSidePx(m, frame.width, frame.height));
-    return `${m.id} · ${side} px${side < MIN_MARKER_SIDE_PX ? " ⚠" : ""}`;
+    return `${m.id} · ${side} px${side < MIN_MARKER_SIDE_PX ? " ⚠" : ""}${touchRatios(m, aspect)}`;
   }).join(", ") : "No markers visible";
   el("marker-frame").textContent = `${frame.width} × ${frame.height} · ${Math.round(frame.ms)} MS`;
   if (trial) { recordMarkerFrame(trial, next, frame); renderTrials(); }
+  if (touchCapture) feedTouchCapture(next, aspect);
+}
+
+/** A4: the live side over each recorded touch reference. Above 1 + toolContactSideMargin, that target is gated. */
+function touchRatios(marker: DetectedMarker, aspect: number): string {
+  const entry = utensilModels.tongs?.markers.find(m => m.markerId === marker.id);
+  const side = entry && poseFromMarkers([marker], { markers: [entry] }, aspect)?.markerSide;
+  if (!entry?.touchSides || !side) return "";
+  return TOUCH_TARGETS.flatMap(target => {
+    const reference = entry.touchSides?.[target];
+    return reference ? [` · ×${(side / reference).toFixed(2)} ${TOUCH_LABELS[target]}`] : [];
+  }).join("");
+}
+
+function startTouchCapture(target: ToolContactTarget) {
+  const calibrated = utensilModels.tongs?.markers ?? [];
+  // The face that would place the tongs right now: the larger visible calibrated marker, as in poseFromMarkers.
+  const face = poseFromMarkers(markers, { markers: calibrated }, canvas.width / canvas.height || 1);
+  if (!running || !face) {
+    el("calibration-help").textContent = `No calibrated face is in view. Rest the jaw ends on the ${TOUCH_LABELS[target]} with a calibrated face up, then try again.`;
+    return;
+  }
+  if (validatePolygon(zones[target])) {
+    el("calibration-help").textContent = `Calibrate the ${SURFACES[target].label} zone first.`;
+    return;
+  }
+  endCalibration();
+  touchCapture = createTouchCapture(face.markerId, target, performance.now());
+  el("calibration-help").textContent = `Recording ID ${face.markerId} on the ${TOUCH_LABELS[target]}. Keep the jaw ends resting on it for a second…`;
+  renderCalibration();
+}
+
+function feedTouchCapture(next: DetectedMarker[], aspect: number) {
+  const c = touchCapture!;
+  const entry = utensilModels.tongs?.markers.find(m => m.markerId === c.markerId);
+  if (!entry) { touchCapture = undefined; renderCalibration(); return; }
+  const result = addTouchFrame(c, next, entry, zones[c.target], aspect, performance.now());
+  if (!result.done) return;
+  touchCapture = undefined;
+  if ("error" in result) {
+    el("calibration-help").textContent = `ID ${c.markerId} ${TOUCH_LABELS[c.target]} touch not saved: ${result.error}`;
+    renderCalibration();
+    return;
+  }
+  const updated = { ...entry, touchSides: { ...entry.touchSides, [c.target]: result.side } };
+  utensilModels = { tongs: { markers: utensilModels.tongs!.markers.map(m => m.markerId === c.markerId ? updated : m) } };
+  saveUtensilModels();
+  el("calibration-help").textContent = `ID ${c.markerId} ${TOUCH_LABELS[c.target]} touch saved. Tool contacts with it now need the tips down at this height.`;
 }
 
 function stopCamera(text = "Camera stopped. Start it again whenever you’re ready.") {
@@ -323,6 +380,7 @@ function stopCamera(text = "Camera stopped. Start it again whenever you’re rea
   running = false;
   vision?.stop(); vision = undefined;
   markers = []; jawPoints = null;
+  touchCapture = undefined;
   endCalibration();
   endTrial();
   el("marker-status").textContent = "Camera offline";
@@ -470,7 +528,13 @@ function renderCalibration() {
     button.setAttribute("aria-pressed", String(calibration?.markerId === Number(button.dataset.calibrate)));
   });
   el<HTMLButtonElement>("clear-calibration").disabled = !calibrated.size;
-  if (!calibration) el("calibration-help").textContent = CALIBRATION_IDLE_HELP;
+  el("touch-refs").textContent = utensilModels.tongs?.markers.map(m =>
+    `${m.markerId} ${TOUCH_TARGETS.map(target => `${TOUCH_LABELS[target]} ${m.touchSides?.[target] ? "✓" : "—"}`).join(" ")}`).join(" · ") || "None";
+  document.querySelectorAll<HTMLButtonElement>("[data-touch]").forEach(button => {
+    button.disabled = !running || !calibrated.size;
+    button.setAttribute("aria-pressed", String(touchCapture?.target === button.dataset.touch));
+  });
+  if (!calibration && !touchCapture) el("calibration-help").textContent = CALIBRATION_IDLE_HELP;
 }
 
 function startCalibration(markerId: number) {
@@ -565,10 +629,20 @@ document.querySelectorAll<HTMLButtonElement>("[data-zone]").forEach(button => bu
 }));
 document.querySelectorAll<HTMLButtonElement>("[data-calibrate]").forEach(button => button.addEventListener("click", () => {
   const id = Number(button.dataset.calibrate);
+  touchCapture = undefined;
   if (calibration?.markerId === id) endCalibration("Calibration cancelled. Nothing was saved.");
   else { endCalibration(); startCalibration(id); }
 }));
+document.querySelectorAll<HTMLButtonElement>("[data-touch]").forEach(button => button.addEventListener("click", () => {
+  const target = button.dataset.touch as ToolContactTarget;
+  if (touchCapture?.target === target) {
+    touchCapture = undefined;
+    renderCalibration();
+    el("calibration-help").textContent = "Touch recording cancelled. Nothing was saved.";
+  } else startTouchCapture(target);
+}));
 el("clear-calibration").addEventListener("click", () => {
+  touchCapture = undefined;
   endCalibration();
   utensilModels = {};
   saveUtensilModels();

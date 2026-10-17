@@ -97,3 +97,20 @@ describe("stored utensil models", () => {
     expect(parseUtensilModels({ tongs: { markers: [] } })).toEqual({});
   });
 });
+
+describe("touch references (A4)", () => {
+  it("keeps valid references and drops each malformed one alone, never the marker", () => {
+    const parsed = parseUtensilModels({ tongs: { markers: [
+      { ...model(11), touchSides: { "meal-1": 0.05, "peanut-source": -1, "wash-station": 0.05 } },
+      { ...model(12), touchSides: { "meal-1": "big", "peanut-source": Number.NaN } },
+    ] } });
+    expect(parsed.tongs?.markers[0]!.touchSides).toEqual({ "meal-1": 0.05 });
+    expect(parsed.tongs?.markers[1]).toEqual(model(12));
+  });
+
+  it("carries the placing face's references into the pose", () => {
+    const models = { markers: [{ ...model(11), touchSides: { "meal-1": 0.04 } }, model(12)] };
+    expect(poseFromMarkers([tag(11, 0.5, 0.5, 0.05)], models, 1)!.touchSides).toEqual({ "meal-1": 0.04 });
+    expect(poseFromMarkers([tag(12, 0.5, 0.5, 0.05)], models, 1)!.touchSides).toEqual({});
+  });
+});

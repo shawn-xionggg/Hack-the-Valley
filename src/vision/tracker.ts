@@ -31,12 +31,21 @@ export function fixedUtensilStatus(zones: ZoneLayout): VisionStatus["utensils"] 
 }
 
 /**
- * Jaw ends only (not the whole padded tip polygon). Amendment A2: the handle never acts in a tool contact,
+ * Jaw ends within the grown target zone, before the height gate. Jaw ends only (not the whole padded tip polygon). Amendment A2: the handle never acts in a tool contact,
  * because from overhead a handle above the bowl during a normal scoop looks the same as one resting in it.
  */
-function tipTouches(pose: UtensilPose, target: Polygon, aspect: number): boolean {
+export function jawsAtTarget(pose: UtensilPose, target: Polygon, aspect: number): boolean {
   const margin = TOOL_ZONE_MARGIN * pose.markerSide;
   return pose.tipContactPoints.some(p => pointPolygonDistance(p, target, aspect) <= margin);
+}
+
+/**
+ * A4 height gate: a marker more than `sideMargin` bigger than this face's touch reference for `b` is closer to
+ * the camera than a touch, so the tips are carried above the target. No reference, no gate (hover counts).
+ */
+export function lowEnoughToTouch(pose: UtensilPose, b: ToolContactTarget, sideMargin: number): boolean {
+  const reference = pose.touchSides[b];
+  return reference === undefined || pose.markerSide <= reference * (1 + sideMargin);
 }
 
 /** Converts normalized landmarks and marker detections into the shared vision events; no exposure state lives here. */
@@ -135,7 +144,9 @@ export function createTracker(
       const activeToolContacts: VisionStatus["activeToolContacts"] = [];
       const current = tongs.tracking === "tracked" || tongs.tracking === "held" ? pose : undefined;
       for (const b of TOOL_TARGETS) {
-        const inside = !!current && tipTouches(current, zones[b], observation?.aspect ?? 1);
+        // A gated frame counts as outside, so a carry over the target is a pass and a descent starts a fresh dwell.
+        const inside = !!current && jawsAtTarget(current, zones[b], observation?.aspect ?? 1)
+          && lowEnoughToTouch(current, b, tuning.toolContactSideMargin);
         if (inside) activeToolContacts.push({ a: "tongs-tip", b });
         step({ a: "tongs-tip", b }, inside, tongs.tracking === "tracked", t);
       }
