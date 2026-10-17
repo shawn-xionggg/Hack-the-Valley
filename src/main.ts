@@ -7,6 +7,8 @@ import type { HandLandmarkerResult } from "@mediapipe/tasks-vision";
 import { startVision } from "./vision";
 import { overlappingZones, validatePolygon } from "./vision/geometry";
 import { fixedUtensilStatus } from "./vision/tracker";
+import { createMarkerSvg, drawMarkerBoxes, startMarkerDetection } from "./vision/aruco";
+import type { DetectedMarker, MarkerDictionary } from "./vision/aruco";
 
 const zoneIds: ZonedObjectId[] = ["peanut-source", "tongs-tip", "tongs-handle", "meal-1", "wash-station"];
 const colors = ["#f8bd72", "#baabff", "#84b8ff", "#fc91ac", "#79ddc1"];
@@ -51,6 +53,10 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
           <div class="status-row"><span>Model</span><span id="model-state">Not loaded</span></div>
           <div class="status-row"><span>Landmarks</span><span id="landmarks">0 points</span></div>
           <div class="status-row"><span>Active zones</span><span id="active">None</span></div>
+          <div class="status-row"><label class="check"><input type="checkbox" id="marker-enabled" checked /> ArUco boxes</label><span id="marker-status" role="status">Camera offline</span></div>
+          <div class="status-row"><label for="marker-dictionary">Marker dictionary</label><select id="marker-dictionary" aria-describedby="marker-help"><option value="ARUCO_4X4_50">4×4 / 50 (OpenCV)</option><option value="ARUCO_MIP_36h12">MIP 36h12</option><option value="ARUCO">ArUco original</option></select></div>
+          <div class="zone-actions"><button class="text-button" id="download-marker">Download test marker #0</button></div>
+          <p class="hint" id="marker-help">Use a marker from the selected dictionary. Print the test SVG or display it on another screen, with its white margin visible.</p>
           <div class="wash-label"><label for="wash">Wash zone dwell</label><span id="wash-text">0%</span></div><progress id="wash" max="1" value="0"></progress>
           <p class="hint">Hold a hand in frame to see its landmarks. Up to two hands at a time.</p>
         </section>
@@ -76,6 +82,10 @@ const start = el<HTMLButtonElement>("start");
 const stop = el<HTMLButtonElement>("stop");
 const camera = el<HTMLSelectElement>("camera");
 const mirror = el<HTMLInputElement>("mirror");
+const markerEnabled = el<HTMLInputElement>("marker-enabled");
+const markerDictionary = el<HTMLSelectElement>("marker-dictionary");
+let markerDetection: { stop(): void } | undefined;
+let markers: DetectedMarker[] = [];
 let stream: MediaStream | undefined;
 let vision: VisionHandle | undefined;
 let generation = 0;
@@ -123,6 +133,7 @@ function draw() {
     }
     hand.forEach((p, n) => { ctx.beginPath(); ctx.arc(p.x * w, p.y * h, [4, 8, 12, 16, 20].includes(n) ? 5 : 3, 0, Math.PI * 2); ctx.fill(); });
   });
+  drawMarkerBoxes(ctx, markers, mirror.checked);
   const first = draft[0], last = draft[draft.length - 1];
   if (first && last) {
     const closing = canClose();
@@ -193,6 +204,8 @@ function stopCamera(text = "Camera stopped. Start it again whenever you’re rea
   generation++;
   running = false;
   vision?.stop(); vision = undefined;
+  markerDetection?.stop(); markerDetection = undefined; markers = [];
+  el("marker-status").textContent = "Camera offline";
   stream?.getTracks().forEach(track => track.stop()); stream = undefined;
   video.srcObject = null;
   lastResults = undefined;
@@ -228,6 +241,7 @@ async function startCamera() {
     canvas.width = video.videoWidth; canvas.height = video.videoHeight;
     el("stage").style.aspectRatio = `${canvas.width} / ${canvas.height}`;
     el("empty").hidden = true;
+    restartMarkers();
     el("resolution").textContent = `${canvas.width} × ${canvas.height} / RAW`;
     el("model-state").textContent = "Loading…";
     message("Camera connected. Downloading the hand-tracking model — the first start may take a moment…");
@@ -352,6 +366,39 @@ start.addEventListener("click", () => void startCamera());
 stop.addEventListener("click", () => stopCamera());
 camera.addEventListener("change", () => { if (running) { stopCamera(); void startCamera(); } });
 mirror.addEventListener("change", () => el("feed").classList.toggle("mirrored", mirror.checked));
+mirror.addEventListener("change", draw);
+function restartMarkers() {
+  markerDetection?.stop(); markerDetection = undefined; markers = [];
+  el("marker-status").textContent = !stream ? "Camera offline" : !markerEnabled.checked ? "Disabled" : "Looking for markers…";
+  draw();
+  if (!stream || !markerEnabled.checked) return;
+  try {
+    markerDetection = startMarkerDetection(video, {
+      dictionary: markerDictionary.value as MarkerDictionary,
+      onMarkers: next => {
+        markers = next;
+        el("marker-status").textContent = next.length ? `${next.length} visible · IDs ${next.map(m => m.id).join(", ")}` : "No markers visible";
+        draw();
+      },
+      onError: error => {
+        markers = []; draw();
+        el("marker-status").textContent = "Detection error";
+        console.error("ArUco detection failed", error);
+      },
+    });
+  } catch (error) {
+    el("marker-status").textContent = "Detection unavailable";
+    console.error("ArUco initialization failed", error);
+  }
+}
+markerEnabled.addEventListener("change", restartMarkers);
+markerDictionary.addEventListener("change", restartMarkers);
+el("download-marker").addEventListener("click", () => {
+  const dictionary = markerDictionary.value as MarkerDictionary;
+  const url = URL.createObjectURL(new Blob([createMarkerSvg(dictionary)], { type: "image/svg+xml" }));
+  const anchor = document.createElement("a"); anchor.href = url; anchor.download = `aruco-${dictionary}-id-0.svg`; anchor.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
 el("clear-events").addEventListener("click", () => {
   events.length = 0; el("events").replaceChildren(); el("event-count").textContent = "0";
   el("events-empty").hidden = false; el<HTMLButtonElement>("export").disabled = true;

@@ -21,6 +21,14 @@ Open the localhost URL printed by Vite, click **Start camera**, and allow camera
 - **Stop** releases the camera and closes the model. Camera and model failures appear below the preview.
 - The log retains the latest 500 events and displays the latest 30. **Export JSON** downloads the retained events and calibrated zones.
 
+## ArUco marker boxes
+
+Start the camera with **ArUco boxes** enabled. Yellow quadrilaterals and IDs follow visible tags. The default dictionary is OpenCV **DICT_4X4_50**; **MIP 36h12** and **ArUco original** are also selectable. The selected dictionary must match the printed tag.
+
+Click **Download test marker #0**, then print the SVG or show it on another screen. Keep its white margin visible and present it flat to the camera. Multiple markers and rotated tags are supported. Labels stay readable when mirroring the feed. Boxes clear when tags disappear or the camera stops.
+
+`src/vision/aruco.ts` runs a separate local detector at up to 10 FPS and 640 px sampling width using [js-aruco2](https://github.com/damianofalcioni/js-aruco2). Its results use normalized raw-frame coordinates. This first step draws marker boxes only; it does not yet move the utensil tip/handle zones or emit utensil contacts. Shared engine and vision interfaces are unchanged.
+
 ## Integrate with the engine
 
 `src/vision/index.ts` exports `startVision`, compatible with `StartVision` from `src/shared/vision-types.ts`. Supply a playing raw video element, calibrated zones, `onEvent`, and `onStatus`. The handle supports `stop()` and `setZones()`. The UI also emits a `ghosttrace:vision-event` CustomEvent on window for each shared contact/wash event:
