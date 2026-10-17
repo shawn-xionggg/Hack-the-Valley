@@ -71,6 +71,7 @@ progress::-webkit-progress-value { background: #b4efad; }
 .zone-button[aria-pressed="true"] { background: #253a2a; border-color: #668766; }
 .zone-dot { width: 7px; height: 7px; border-radius: 2px; flex-shrink: 0; }
 .zone-state { color: #86978b; font-size: 9px; margin-left: auto; }
+.zone-state.warn { color: #f8bd72; font-weight: 600; }
 .zone-actions { display: flex; gap: 12px; padding: 6px 20px 0; }
 .text-button { border: 0; color: #a7c8ad; font-size: 10px; padding: 5px 0; background: transparent; }
 .text-button:hover:enabled { color: #dbffd7; }

@@ -5,6 +5,7 @@ import type { ContactEvent, VisionStatus, WashEvent } from "./shared/events";
 import type { VisionHandle } from "./shared/vision-types";
 import type { HandLandmarkerResult } from "@mediapipe/tasks-vision";
 import { startVision } from "./vision";
+import { overlappingZones, validatePolygon } from "./vision/geometry";
 
 const zoneIds: ZonedObjectId[] = ["peanut-source", "tongs-tip", "tongs-handle", "meal-1", "wash-station"];
 const colors = ["#f8bd72", "#baabff", "#84b8ff", "#fc91ac", "#79ddc1"];
@@ -53,7 +54,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
           <p class="hint">Hold a hand in frame to see its landmarks. Up to two hands at a time.</p>
         </section>
         <section class="panel zones-panel"><div class="panel-heading"><h2>Contact zones</h2><span class="mono" id="zone-count">0 / 5</span></div>
-          <p class="hint zone-intro">Select a surface, then drag a rectangle on the camera to mark its area.</p>
+          <p class="hint zone-intro">Select a surface, then click its corners on the camera to outline its area.</p>
           <div id="zone-list" class="zone-list">${zoneIds.map((id, i) => `<button class="zone-button" data-zone="${id}" aria-pressed="false"><span class="zone-dot" style="background:${colors[i]}"></span><span>${SURFACES[id].label}</span><span class="zone-state">Unset</span></button>`).join("")}</div>
           <div class="zone-actions"><button class="text-button" id="presets">Use demo layout</button><button class="text-button" id="clear-zones">Clear zones</button></div>
           <p class="hint" id="zone-help">Zones are saved on this device. Recalibrate after moving the camera or switching cameras.</p>
@@ -79,8 +80,13 @@ let vision: VisionHandle | undefined;
 let generation = 0;
 let running = false;
 let selectedZone: ZonedObjectId | undefined;
-let dragStart: Point | undefined;
-let dragEnd: Point | undefined;
+/** Vertices placed so far for the selected zone, in raw normalized coordinates. */
+let draft: Point[] = [];
+let cursor: Point | undefined;
+const CLOSE_RADIUS_PX = 12; // clicking this close to the first vertex closes the polygon
+const MIN_VERTEX_GAP_PX = 6; // clicks this close to the previous vertex are ignored (double-clicks)
+const DRAW_HELP = "Click to place corners. Click the first corner or press Enter to finish · Backspace undoes · Esc cancels.";
+const IDLE_HELP = "Zones are saved on this device. Recalibrate after moving the camera or switching cameras.";
 let lastResults: HandLandmarkerResult | undefined;
 let status: VisionStatus | undefined;
 const events: (ContactEvent | WashEvent)[] = [];
@@ -116,11 +122,37 @@ function draw() {
     }
     hand.forEach((p, n) => { ctx.beginPath(); ctx.arc(p.x * w, p.y * h, [4, 8, 12, 16, 20].includes(n) ? 5 : 3, 0, Math.PI * 2); ctx.fill(); });
   });
-  if (dragStart && dragEnd) {
-    ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
-    ctx.strokeRect(dragStart[0] * w, dragStart[1] * h, (dragEnd[0] - dragStart[0]) * w, (dragEnd[1] - dragStart[1]) * h);
-    ctx.setLineDash([]);
+  const first = draft[0], last = draft[draft.length - 1];
+  if (first && last) {
+    const closing = canClose();
+    ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 2;
+    ctx.beginPath();
+    draft.forEach(([x, y], n) => n === 0 ? ctx.moveTo(x * w, y * h) : ctx.lineTo(x * w, y * h));
+    ctx.stroke();
+    if (cursor) {
+      // Rubber-band edge from the last corner to the pointer, snapping to the first corner when it would close.
+      const [x, y] = closing ? first : cursor;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath(); ctx.moveTo(last[0] * w, last[1] * h); ctx.lineTo(x * w, y * h); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    draft.forEach(([x, y], n) => {
+      ctx.beginPath();
+      ctx.arc(x * w, y * h, n === 0 && closing ? 8 : 4, 0, Math.PI * 2);
+      ctx.fillStyle = n === 0 ? colors[zoneIds.indexOf(selectedZone!)] ?? "#ffffff" : "#ffffff";
+      ctx.fill();
+    });
   }
+}
+
+/** Distance between two raw normalized points in on-screen CSS pixels (mirroring doesn't change it). */
+function screenDistance(a: Point, b: Point): number {
+  const bounds = canvas.getBoundingClientRect();
+  return Math.hypot((a[0] - b[0]) * bounds.width, (a[1] - b[1]) * bounds.height);
+}
+
+function canClose(): boolean {
+  return draft.length >= 3 && !!cursor && screenDistance(cursor, draft[0]!) <= CLOSE_RADIUS_PX;
 }
 
 function updateStatus(next: VisionStatus) {
@@ -161,6 +193,7 @@ function stopCamera(text = "Camera stopped. Start it again whenever you’re rea
   stream?.getTracks().forEach(track => track.stop()); stream = undefined;
   video.srcObject = null;
   lastResults = undefined;
+  draft = []; cursor = undefined;
   updateStatus({ t: performance.now(), handsVisible: 0, activeZones: [], washProgress: 0, fps: 0 });
   draw();
   el("empty").hidden = false;
@@ -235,9 +268,12 @@ function saveZones() {
   vision?.setZones(zones);
   try { localStorage.setItem(ZONE_LAYOUT_STORAGE_KEY, JSON.stringify(zones)); }
   catch { el("zone-help").textContent = "Browser storage is unavailable. These zones will last for this session only."; }
+  const overlapping = new Set(overlappingZones(zones).flat());
   document.querySelectorAll<HTMLButtonElement>("[data-zone]").forEach(button => {
     const id = button.dataset.zone as ZonedObjectId;
-    button.querySelector(".zone-state")!.textContent = zones[id].length ? "Set" : "Unset";
+    const state = button.querySelector(".zone-state")!;
+    state.textContent = !zones[id].length ? "Unset" : overlapping.has(id) ? "Overlaps" : "Set";
+    state.classList.toggle("warn", overlapping.has(id));
     button.setAttribute("aria-pressed", String(id === selectedZone));
   });
   el("zone-count").textContent = `${zoneIds.filter(id => zones[id].length).length} / 5`;
@@ -249,26 +285,59 @@ function pointer(event: PointerEvent): Point {
   const x = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
   return [mirror.checked ? 1 - x : x, Math.max(0, Math.min(1, (event.clientY - bounds.top) / bounds.height))];
 }
+/** Switching zones (or deselecting) always discards an unfinished outline. */
+function selectZone(next: ZonedObjectId | undefined) {
+  selectedZone = next;
+  draft = []; cursor = undefined;
+  canvas.classList.toggle("calibrating", !!next);
+  saveZones();
+  el("zone-help").textContent = next ? `Outline ${SURFACES[next].label}. ${DRAW_HELP}` : IDLE_HELP;
+}
+
+function finishDraft() {
+  if (!selectedZone) return;
+  const error = validatePolygon(draft);
+  if (error) { el("zone-help").textContent = error; return; }
+  const id = selectedZone;
+  zones[id] = draft;
+  selectZone(undefined);
+  const others = overlappingZones(zones).flatMap(([a, b]) => a === id ? [b] : b === id ? [a] : []);
+  el("zone-help").textContent = others.length ? overlapWarning(id, others)
+    : `${SURFACES[id].label} saved. Select another surface to outline it.`;
+}
+
+/** Saved anyway (the tracker can cope), but the person calibrating should know why it's risky. */
+function overlapWarning(id: ZonedObjectId, others: ZonedObjectId[]): string {
+  const isTongPair = (other: ZonedObjectId) => SURFACES[id].utensilId !== undefined && SURFACES[id].utensilId === SURFACES[other].utensilId;
+  const reasons = [
+    others.some(isTongPair) && "Leave a gap over the hinge so tip and handle touches can't be confused.",
+    others.some(other => !isTongPair(other)) && "A touch in the shared area counts for both zones.",
+  ].filter(Boolean).join(" ");
+  return `⚠ ${SURFACES[id].label} saved, but it overlaps ${others.map(other => SURFACES[other].label).join(", ")}. ${reasons}`;
+}
+
 canvas.addEventListener("pointerdown", event => {
   if (!selectedZone || !stream) return;
-  dragStart = pointer(event); dragEnd = dragStart;
-  canvas.setPointerCapture(event.pointerId); draw();
+  cursor = pointer(event);
+  if (canClose()) { finishDraft(); return; }
+  const last = draft[draft.length - 1];
+  if (last && screenDistance(cursor, last) < MIN_VERTEX_GAP_PX) return;
+  draft.push(cursor);
+  draw();
 });
-canvas.addEventListener("pointermove", event => { if (dragStart) { dragEnd = pointer(event); draw(); } });
-canvas.addEventListener("pointerup", event => {
-  if (!dragStart || !selectedZone) return;
-  const end = pointer(event);
-  const x1 = Math.min(dragStart[0], end[0]), x2 = Math.max(dragStart[0], end[0]);
-  const y1 = Math.min(dragStart[1], end[1]), y2 = Math.max(dragStart[1], end[1]);
-  if (x2 - x1 > 0.02 && y2 - y1 > 0.02) zones[selectedZone] = [[x1, y1], [x2, y1], [x2, y2], [x1, y2]];
-  dragStart = undefined; dragEnd = undefined; saveZones();
+canvas.addEventListener("pointermove", event => { if (selectedZone && draft.length) { cursor = pointer(event); draw(); } });
+canvas.addEventListener("pointerleave", () => { cursor = undefined; draw(); });
+window.addEventListener("keydown", event => {
+  if (!selectedZone || event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) return;
+  if (event.key === "Enter") finishDraft();
+  else if (event.key === "Backspace" && draft.length) draft.pop();
+  else if (event.key === "Escape") selectZone(undefined);
+  else return;
+  event.preventDefault(); // stops Enter from also "clicking" the focused zone button
+  draw();
 });
-canvas.addEventListener("pointercancel", () => { dragStart = undefined; dragEnd = undefined; draw(); });
 document.querySelectorAll<HTMLButtonElement>("[data-zone]").forEach(button => button.addEventListener("click", () => {
-  selectedZone = selectedZone === button.dataset.zone ? undefined : button.dataset.zone as ZonedObjectId;
-  canvas.classList.toggle("calibrating", !!selectedZone);
-  saveZones();
-  el("zone-help").textContent = selectedZone ? `Draw the area for ${SURFACES[selectedZone].label} on the camera feed.` : "Zones are saved on this device. Recalibrate after moving the camera or switching cameras.";
+  selectZone(selectedZone === button.dataset.zone ? undefined : button.dataset.zone as ZonedObjectId);
 }));
 el("presets").addEventListener("click", () => {
   zoneIds.forEach((id, i) => { const x = 0.035 + i * 0.195; zones[id] = [[x, 0.6], [x + 0.15, 0.6], [x + 0.15, 0.93], [x, 0.93]]; });
