@@ -1,6 +1,7 @@
 # Local environment variables and secrets
 .env
 .env.*
+hardware/esp32-alert/wifi-config.h
 !.env.example
 !.env.*.example
 
