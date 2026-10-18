@@ -44,7 +44,7 @@ const A3_SCENARIOS = SCENARIOS.filter(scenario => /^1[5-7]\./.test(scenario.name
 
 const render = (state: EngineState, tracking: UtensilTracking | null = null) => renderToStaticMarkup(
   <>
-    <SurfaceCards state={state} tracking={tracking} onReplaceTongs={() => {}} />
+    <SurfaceCards state={state} tracking={tracking} />
     <AlertPanel alerts={state.alerts} onAcknowledge={() => {}} />
   </>,
 );
@@ -134,13 +134,11 @@ describe("dashboard rendering", () => {
     expect(render(run({ ...MOVING_TONGS_SCRIPT, events: [] }), "fixed").match(/Tongs: fixed position/g)).toHaveLength(2);
   });
 
-  it("offers tong replacement only while a tong part has tracked exposure", () => {
-    expect(render(run({ ...DEMO_SCRIPT, events: [] }))).not.toContain(labels.TONGS_REPLACE_BUTTON);
-    expect(render(run(DEMO_SCRIPT))).toContain(labels.TONGS_REPLACE_BUTTON);
-    expect(render(run(MOVING_TONGS_SCRIPT))).toContain(labels.TONGS_REPLACE_PROMPT);
-    const replaced = run({ ...DEMO_SCRIPT, events: [...DEMO_SCRIPT.events,
-      { id: "r1", t: 99_000, kind: "utensil-replaced-confirmed", utensilId: "tongs", source: "manual" }] });
-    expect(render(replaced)).not.toContain(labels.TONGS_REPLACE_BUTTON);
+  it("offers no manual tong reset, even while the tongs are exposed", () => {
+    for (const html of [render(run(DEMO_SCRIPT)), render(run(MOVING_TONGS_SCRIPT))]) {
+      expect(html).toContain("Potential peanut exposure");
+      expect(html).not.toMatch(/tongs replaced|fresh pair/i);
+    }
   });
 
   it("shows the utensil wash on both tong cards once there is one, and not before (A3)", () => {
@@ -159,13 +157,9 @@ describe("dashboard rendering", () => {
     expect(render(run(DEMO_SCRIPT))).not.toContain(labels.UTENSIL_WASH_LABEL); // Act 1's hand wash isn't a utensil wash
   });
 
-  it("offers the tong reset after a utensil wash only while the tongs are exposed again (A3)", () => {
-    const [cleared, rewashed, mealHeld] = A3_SCENARIOS.map(a3State) as [EngineState, EngineState, EngineState];
-    expect(render(cleared)).not.toContain(labels.TONGS_REPLACE_BUTTON); // 15: hands, tip and handle all reset
-    expect(render(rewashed)).toContain(labels.TONGS_REPLACE_PROMPT); // 16: the unwashed hands re-exposed the tips
-    expect(render(mealHeld)).not.toContain(labels.TONGS_REPLACE_BUTTON); // 17: the meal stays held, the tongs don't
+  it("keeps the meal held after a utensil wash clears the tongs (A3)", () => {
+    const mealHeld = a3State(A3_SCENARIOS[2]!); // 17: the meal stays held, the tongs don't
     expect(render(mealHeld)).toContain("Action required — hold meal");
-    expect(labels.TONGS_REPLACE_PROMPT).toMatch(/sink/);
   });
 
   it("shows the tong dwell beside the hand ring only while the tongs are in the sink (A3)", () => {

@@ -76,11 +76,6 @@ export const EFFECT_LABELS: Record<LogEffect, string> = {
   "ignored-invalid-contact": "ignored · invalid pair",
 };
 
-/** Shown under the cards only while a tong part has tracked exposure. Two resets exist since A3: a sink wash
- *  together with the hands (camera, no button) or a confirmed replacement (§3.2 rule 3). */
-export const TONGS_REPLACE_PROMPT =
-  "The tongs have tracked exposure. Wash them at the sink together with your hands, or swap for a fresh pair and confirm.";
-export const TONGS_REPLACE_BUTTON = "Confirm tongs replaced";
 export const MANUAL_WASH_BUTTON = "Confirm hands washed with soap and water";
 export const MANUAL_WASH_NOTE = "Fallback for when camera wash detection isn't reliable (spec §4.5).";
 

@@ -103,7 +103,6 @@ export function mountEnginePanel(container: HTMLElement): EnginePanel {
     <div id="alerts"></div>
     <div class="zone-actions engine-actions">
       <button class="text-button" id="manual-wash">Confirm hands washed with soap and water</button>
-      <button class="text-button" id="replaced">Confirm tongs replaced</button>
       <button class="text-button" id="reset">Reset session</button>
       <button class="text-button" id="sim-act1">Replay Act 1 (simulated)</button>
       <button class="text-button" id="sim-act2">Replay Act 2 (simulated)</button>
@@ -220,8 +219,6 @@ export function mountEnginePanel(container: HTMLElement): EnginePanel {
   engine.subscribe(render);
   el("manual-wash").addEventListener("click", () =>
     dispatch({ ...stamp(), kind: "wash", method: "manual-tap", source: "manual", verified: false }));
-  el("replaced").addEventListener("click", () =>
-    dispatch({ ...stamp(), kind: "utensil-replaced-confirmed", utensilId: "tongs", source: "manual" }));
   function resetSession() {
     stopReplay();
     simulated = false;

@@ -126,7 +126,6 @@ select { background: var(--bg); color: var(--text); border: 1px solid var(--bord
 
 .sim-banner .banner-button { margin-left: 14px; padding: 5px 12px; font-size: 13px; }
 
-.tong-action { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 12px; padding: 12px 14px; border: 1px solid var(--amber-border); border-radius: 10px; background: var(--amber-bg); font-size: 14px; color: #f3d6a6; }
 
 /* Collapsible panels (operator controls, event log): the summary is the panel heading with a caret. */
 details.panel > summary { list-style: none; cursor: pointer; }

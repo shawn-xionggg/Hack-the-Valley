@@ -1,5 +1,5 @@
 // GhostTrace dashboard (Person 3): renders EngineState and VisionStatus, and sends the manual events
-// (wash, tongs replaced, acknowledge, reset) through engine.dispatch. Spec §3.3 wording lives in labels.ts.
+// (wash, acknowledge, reset) through engine.dispatch. Spec §3.3 wording lives in labels.ts.
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { createEngine } from "../engine";
@@ -116,8 +116,7 @@ export function App() {
 
         <section className="panel status-panel" aria-label="Tracked exposure">
           <h2>Tracked exposure</h2>
-          <SurfaceCards state={state} tracking={tracking}
-            onReplaceTongs={() => dispatch({ ...stamp(), kind: "utensil-replaced-confirmed", utensilId: "tongs", source: "manual" })} />
+          <SurfaceCards state={state} tracking={tracking} />
           <h2 className={hasAlert ? "alerting" : undefined}>Alerts</h2>
           <AlertPanel alerts={state.alerts}
             onAcknowledge={alertId => dispatch({ ...stamp(), kind: "alert-acknowledged", alertId, source: "manual" })} />
