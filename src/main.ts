@@ -7,7 +7,7 @@ import type { HandLandmarkerResult } from "@mediapipe/tasks-vision";
 import { startVision } from "./vision";
 import { mountEnginePanel } from "./engine-panel";
 import { overlappingZones, parseZoneLayout, polygonsOverlap, validatePolygon } from "./vision/geometry";
-import { fixedUtensilStatus } from "./vision/tracker";
+import { HAND_CONTACT_DWELL_MS, fixedUtensilStatus } from "./vision/tracker";
 import { calibrateMarker, parseUtensilModels, poseFromMarkers } from "./vision/pose";
 import { addTouchFrame, createTouchCapture } from "./vision/touch";
 import type { TouchCapture } from "./vision/touch";
@@ -403,6 +403,12 @@ function stopCamera(text = "Camera stopped. Start it again whenever you’re rea
   message(text);
 }
 
+/** Rig experiment: `?handDwell=600` overrides the fingertip contact dwell, to compare values without a rebuild. */
+const handContactDwellMs = (() => {
+  const value = Number(new URLSearchParams(location.search).get("handDwell"));
+  return Number.isFinite(value) && value > 0 ? value : HAND_CONTACT_DWELL_MS;
+})();
+
 async function startCamera() {
   const attempt = ++generation;
   start.disabled = true; stop.disabled = false; camera.disabled = true;
@@ -427,7 +433,7 @@ async function startCamera() {
     el("marker-status").textContent = "Starting…";
     message("Camera connected. Downloading the hand-tracking model — the first start may take a moment…");
     draw();
-    const handle = await startVision({ video, zones, utensilModels, onEvent: logEvent,
+    const handle = await startVision({ video, zones, utensilModels, onEvent: logEvent, handContactDwellMs,
       onStatus: next => { updateStatus(next); draw(); },
       onResults: result => { lastResults = result; },
       onMarkers,
@@ -439,7 +445,7 @@ async function startCamera() {
     running = true;
     renderTrials();
     renderCalibration();
-    el("model-state").textContent = "MediaPipe · ready";
+    el("model-state").textContent = `MediaPipe · ready · hand dwell ${handContactDwellMs} ms`;
     el("badge").textContent = "● Tracking live";
     el("badge").classList.add("live");
     camera.disabled = false;

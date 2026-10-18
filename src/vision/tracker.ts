@@ -48,11 +48,18 @@ export function lowEnoughToTouch(pose: UtensilPose, b: ToolContactTarget, sideMa
   return reference === undefined || pose.markerSide <= reference * (1 + sideMargin);
 }
 
+/**
+ * RIG EXPERIMENT (branch vision/hand-dwell-800, not in the spec): fingertip contacts need this long, so a hand
+ * passing over a zone doesn't count. Tool contacts keep `contactDwellMs` (400 ms) and A4's height gate. Spec §4.4
+ * still says 400 ms for every contact, so this needs an amendment before it can merge.
+ */
+export const HAND_CONTACT_DWELL_MS = 800;
+
 /** Converts normalized landmarks and marker detections into the shared vision events; no exposure state lives here. */
 export function createTracker(
   initialZones: ZoneLayout,
   onEvent: (event: ContactEvent | WashEvent | UtensilWashedEvent) => void,
-  options: Partial<Tuning> = {},
+  { handContactDwellMs = HAND_CONTACT_DWELL_MS, ...options }: Partial<Tuning> & { handContactDwellMs?: number } = {},
   initialModels: UtensilModels = {},
 ) {
   const tuning = { ...DEFAULT_TUNING, ...options };
@@ -92,7 +99,7 @@ export function createTracker(
     if (inside && counted) dwell.hits++;
     // Re-fire while held: a grip that started clean must still pick up exposure that arrives later.
     const due = dwell.lastFired === undefined
-      ? t - dwell.entered >= tuning.contactDwellMs
+      ? t - dwell.entered >= (pair.a === "hands" ? handContactDwellMs : tuning.contactDwellMs)
       : t - dwell.lastFired >= tuning.heldContactRefireMs;
     if (inside && due) {
       onEvent({ id: crypto.randomUUID(), t, kind: "contact", ...pair,

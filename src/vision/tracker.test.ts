@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 import type { Point, Polygon, UtensilMarkerModel, UtensilModels, ZoneLayout } from "../shared/config";
 import type { ContactEvent, UtensilWashedEvent, WashEvent } from "../shared/events";
 import type { DetectedMarker } from "./aruco";
-import { TOOL_ZONE_MARGIN, createTracker, pointInPolygon } from "./tracker";
+import { HAND_CONTACT_DWELL_MS, TOOL_ZONE_MARGIN, createTracker, pointInPolygon } from "./tracker";
 
 const square: [number, number][] = [[0.1, 0.1], [0.4, 0.1], [0.4, 0.4], [0.1, 0.4]];
 const zones = (): ZoneLayout => ({ "peanut-source": square, "tongs-tip": [], "tongs-handle": [], "meal-1": [], "wash-station": [] });
 type Emitted = ContactEvent | WashEvent | UtensilWashedEvent;
 const hand = Array.from({ length: 21 }, () => ({ x: 0.2, y: 0.2, z: 0 }));
+/** Pins fingertip contacts to the spec's 400 ms, so rule tests don't depend on the rig experiment's value. */
+const SPEC_DWELL = { handContactDwellMs: 400 };
 
 describe("vision event integration", () => {
   it("checks polygon containment in raw normalized coordinates", () => {
@@ -18,7 +20,7 @@ describe("vision event integration", () => {
 
   it("emits once per dwell and rearms only after exit", () => {
     const events: Emitted[] = [];
-    const tracker = createTracker(zones(), event => events.push(event));
+    const tracker = createTracker(zones(), event => events.push(event), SPEC_DWELL);
     for (let t = 0; t <= 1000; t += 100) tracker.update([hand], t, 10);
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ kind: "contact", a: "hands", b: "peanut-source", source: "camera", t: 400, confidence: 1 });
@@ -31,7 +33,7 @@ describe("vision event integration", () => {
 
   it("re-fires every heldContactRefireMs while held, each with a fresh id", () => {
     const events: Emitted[] = [];
-    const tracker = createTracker(zones(), event => events.push(event));
+    const tracker = createTracker(zones(), event => events.push(event), SPEC_DWELL);
     for (let t = 0; t <= 2500; t += 100) tracker.update([hand], t, 10);
     expect(events.map(e => e.t)).toEqual([400, 1400, 2400]);
     expect(new Set(events.map(e => e.id)).size).toBe(3);
@@ -39,7 +41,7 @@ describe("vision event integration", () => {
 
   it("scores each re-fire on the frames since the previous emission", () => {
     const events: Emitted[] = [];
-    const tracker = createTracker(zones(), event => events.push(event));
+    const tracker = createTracker(zones(), event => events.push(event), SPEC_DWELL);
     for (let t = 0; t <= 400; t += 100) tracker.update([hand], t, 10);
     tracker.update([], 500, 10); // brief gaps under contactExitMs keep the dwell alive
     tracker.update([], 600, 10);
@@ -77,10 +79,29 @@ describe("vision event integration", () => {
 
   it("resolves overlapping tong zones to a single contact", () => {
     const events: Emitted[] = [];
-    const tracker = createTracker({ ...zones(), "peanut-source": [], "tongs-tip": square, "tongs-handle": square }, event => events.push(event));
+    const tracker = createTracker({ ...zones(), "peanut-source": [], "tongs-tip": square, "tongs-handle": square }, event => events.push(event), SPEC_DWELL);
     for (let t = 0; t <= 500; t += 100) tracker.update([hand], t, 10);
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ kind: "contact", b: "tongs-tip" });
+  });
+
+  it("rig experiment: fingertip contacts need HAND_CONTACT_DWELL_MS, so a pass over a zone doesn't count", () => {
+    const pass: Emitted[] = [];
+    const passing = createTracker(zones(), event => pass.push(event));
+    for (let t = 0; t <= HAND_CONTACT_DWELL_MS - 100; t += 100) passing.update([hand], t, 10); // a slow pass, just under
+    passing.update([], HAND_CONTACT_DWELL_MS, 10);
+    expect(pass).toEqual([]);
+    const touch: Emitted[] = [];
+    const touching = createTracker(zones(), event => touch.push(event));
+    for (let t = 0; t <= HAND_CONTACT_DWELL_MS; t += 100) touching.update([hand], t, 10);
+    expect(touch.map(e => e.t)).toEqual([HAND_CONTACT_DWELL_MS]);
+  });
+
+  it("rig experiment: handContactDwellMs overrides the default", () => {
+    const events: Emitted[] = [];
+    const tracker = createTracker(zones(), event => events.push(event), { handContactDwellMs: 600 });
+    for (let t = 0; t <= 600; t += 100) tracker.update([hand], t, 10);
+    expect(events.map(e => e.t)).toEqual([600]);
   });
 
   it("requires sustained wash dwell and an exit before another wash", () => {
@@ -162,6 +183,13 @@ describe("moving tongs", () => {
     expect(events[0]).toMatchObject({ kind: "contact", a: "tongs-tip", b: "peanut-source", confidence: 1, source: "camera" });
   });
 
+  it("rig experiment: tool contacts keep contactDwellMs while fingertips wait longer", () => {
+    const events: Emitted[] = [];
+    const tracker = createTracker(table(), event => events.push(event), {}, models()); // default hand dwell
+    for (let t = 0; t <= 400; t += 100) tracker.update([handAt(0.27, 0.5)], t, 10, seen(tag(11))); // hand and tips in the peanuts
+    expect(events.map(e => e.kind === "contact" && `${e.a}@${e.t}`)).toEqual(["tongs-tip@400"]);
+  });
+
   it("counts only tracked frames toward confidence, and stops at lost", () => {
     const events: Emitted[] = [];
     const tracker = createTracker(table(), event => events.push(event), {}, models());
@@ -210,7 +238,7 @@ describe("moving tongs", () => {
 
   it("tests fingertips against the moving parts, not the static tong zones", () => {
     const events: Emitted[] = [];
-    const tracker = createTracker({ ...table(), "peanut-source": [] }, event => events.push(event), {}, models());
+    const tracker = createTracker({ ...table(), "peanut-source": [] }, event => events.push(event), SPEC_DWELL, models());
     for (let t = 0; t <= 400; t += 100) tracker.update([handAt(0.4, 0.5), handAt(0.07, 0.07)], t, 10, seen(tag(11)));
     expect(events.filter(e => e.kind === "contact" && e.a === "hands").map(e => e.kind === "contact" && e.b)).toEqual(["tongs-tip"]);
   });
@@ -439,7 +467,7 @@ describe("height gate (A4)", () => {
 
   it("leaves fingertip contacts ungated", () => {
     const events: Emitted[] = [];
-    const tracker = createTracker(table(), event => events.push(event), {}, models(touched({ "peanut-source": 0.05 })));
+    const tracker = createTracker(table(), event => events.push(event), SPEC_DWELL, models(touched({ "peanut-source": 0.05 })));
     frames(tracker, 0, 400, [handAt(0.27, 0.46)], lifted); // in the peanuts, outside the lifted tip polygon
     expect(contacts(events)).toEqual(["hands>peanut-source@400"]);
   });
