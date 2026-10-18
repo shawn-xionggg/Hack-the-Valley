@@ -70,6 +70,13 @@ window.addEventListener("ghosttrace:vision-event", event => {
 
 The vision module follows the [MediaPipe Web hand landmark API](https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker/web_js). It tries GPU acceleration, then CPU, caps inference at 20 FPS, and skips duplicate video frames. Inference currently runs on the main thread; a worker is the next step if slower devices show UI lag. This frontend does not implement the exposure engine or a remote AI endpoint. Zone overlap estimates contact; it does not establish physical contact or detect allergens.
 
+## ESP32 alerts
+
+Connect an ESP32 with an RGB LED and active buzzer over USB using **Connect ESP**
+under Exposure tracking. Existing `action-required` status drives red/amber flashes
+and beeping; session reset returns the output to blue and silent. See
+[hardware setup, firmware and demo steps](hardware/README.md).
+
 ## Check
 
 ```powershell
