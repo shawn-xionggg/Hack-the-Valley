@@ -19,7 +19,7 @@ import type { GhostEvent, WashMethod } from "./events";
  * "potential-exposure": at least one allergen may have reached this surface through
  *   observed contacts.
  * "action-required": a meal has potential exposure to an allergen its order declares.
- *   Stays until session reset, even after the alert is acknowledged.
+ *   Stays until that meal or the session is reset, even after acknowledgement.
  */
 export type SurfaceStatus = "no-tracked-exposure" | "potential-exposure" | "action-required";
 
@@ -37,7 +37,7 @@ export interface ExposureRecord {
   /** The record on fromSurfaceId that was active at the time (provenance pointer); null for origins. */
   parentRecordId: string | null;
   t: number;
-  /** Wash, utensil-washed or utensil-replaced event that cleared it; null while active. */
+  /** Wash, replacement or meal-reset event that cleared it; null while active. */
   clearedByEventId: string | null;
 }
 

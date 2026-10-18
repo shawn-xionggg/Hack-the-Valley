@@ -100,7 +100,7 @@ describe("dashboard rendering", () => {
       ["Allergen source", "Hands", "Tong tips", "[Hands washed]", "Tong tips", "Hands", "Meal · Order #4"]);
     const html = render(state);
     expect(html).toContain("Action required — hold meal");
-    expect(html).toContain("The meal stays on hold until the session is reset.");
+    expect(html).toContain("The meal stays on hold until the meal or session is reset.");
     expect(html).not.toContain("Acknowledge alert"); // the script acknowledged it
   });
 

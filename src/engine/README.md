@@ -84,9 +84,12 @@ API on top of the registry, `applyContact` and `buildExposureChain`. `dispatch`
 checks duplicate IDs across every event kind first, then applies spec §3.5:
 contacts (through `applyContact`), washes (hands only), utensil replacement and
 A3 utensil washes (tip and handle together; a utensil wash also sets
-`lastUtensilWash` and is never a chain step), acknowledgements (alert only), and session reset (fresh
+`lastUtensilWash` and is never a chain step), acknowledgements (alert only), meal reset
+(clear only that meal's records and alerts, retaining history), and session reset (fresh
 registry, new deterministic session ID `session-N`). After each applied contact it
-raises at most one `alert:<mealId>:<allergen>` per meal and allergen; the alert
+raises at most one `alert:<mealId>:<allergen>` per meal and allergen until meal reset.
+After meal reset, subsequent alerts append `:after:<resetEventId>` so old acknowledgements
+cannot target the replacement meal's alert and dashboard chimes can re-arm. The alert
 chain is the recorded ancestry plus every wash that cleared a record on that path,
 origin first, then by time. Surface statuses are rebuilt from records and alerts
 after every event, so a meal with an alert stays `action-required` until reset.

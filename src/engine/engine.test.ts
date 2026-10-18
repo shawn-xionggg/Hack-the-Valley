@@ -70,6 +70,55 @@ describe("createEngine", () => {
     expect(run()).toEqual(run());
   });
 
+  it("resets only the meal, retains history and wash state, and re-arms deterministically", () => {
+    const engine = createEngine();
+    const events = new ScriptBuilder().wash().utensilWash()
+      .toolContact("tongs-tip", "peanut-source").toolContact("tongs-tip", "meal-1").events;
+    events.forEach(event => engine.dispatch(event));
+    const before = engine.getState();
+    const reset: GhostEvent = { kind: "meal-reset", mealId: "meal-1", id: "meal-replacement", t: 5000, source: "manual" };
+    const after = engine.dispatch(reset);
+    expect(after.sessionId).toBe(before.sessionId);
+    expect(after.lastWash).toEqual(before.lastWash);
+    expect(after.lastUtensilWash).toEqual(before.lastUtensilWash);
+    expect(after.alerts).toEqual([]);
+    expect(after.records).toHaveLength(before.records.length);
+    expect(after.records.filter(record => record.surfaceId === "meal-1"))
+      .toEqual(before.records.filter(record => record.surfaceId === "meal-1")
+        .map(record => ({ ...record, clearedByEventId: reset.id })));
+    expect(before.records.find(record => record.surfaceId === "meal-1")?.clearedByEventId).toBeNull();
+    expect(after.records.filter(record => record.surfaceId !== "meal-1"))
+      .toEqual(before.records.filter(record => record.surfaceId !== "meal-1"));
+    for (const id of ["hands", "tongs-tip", "tongs-handle", "peanut-source"] as const) {
+      expect(after.surfaces[id]).toEqual(before.surfaces[id]);
+    }
+    expect(after.surfaces["meal-1"].status).toBe("no-tracked-exposure");
+    expect(after.log.slice(0, -1)).toEqual(before.log);
+    const duplicate = engine.dispatch(reset);
+    expect(duplicate.log.at(-1)?.effect).toBe("ignored-duplicate-id");
+    expect(duplicate.records).toEqual(after.records);
+    const contact: GhostEvent = { kind: "contact", a: "tongs-tip", b: "meal-1", confidence: 1,
+      id: "replacement-contact", t: 6000, source: "camera" };
+    const exposedAgain = engine.dispatch(contact);
+    expect(exposedAgain.alerts[0]?.id).not.toBe(before.alerts[0]?.id);
+    expect(exposedAgain.alerts[0]?.acknowledged).toBe(false);
+    expect(exposedAgain.alerts[0]?.chain.length).toBeGreaterThan(0);
+    const replay = createEngine();
+    for (const { event } of exposedAgain.log) replay.dispatch(event);
+    expect(replay.getState()).toEqual(exposedAgain);
+  });
+
+  it("does not clear another surface when a malformed meal-reset names it", () => {
+    const engine = createEngine();
+    new ScriptBuilder().contact("peanut-source").events.forEach(event => engine.dispatch(event));
+    const before = engine.getState();
+    const after = engine.dispatch({ kind: "meal-reset", mealId: "hands", id: "bad-meal", t: 2000,
+      source: "manual" } as unknown as GhostEvent);
+    expect(after.records).toEqual(before.records);
+    expect(after.surfaces).toEqual(before.surfaces);
+    expect(after.log.at(-1)?.effect).toBe("no-change");
+  });
+
   it("returns a new state object per dispatch and leaves earlier states untouched", () => {
     const engine = createEngine();
     const first = engine.getState();

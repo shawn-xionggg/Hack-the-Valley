@@ -4,9 +4,9 @@ The browser reads existing meal alerts and `EngineState.surfaces[*].status`. Whi
 there is an **unacknowledged** alert on an `action-required` meal, the ESP flashes
 **red on and off** and beeps on red. **Acknowledgement changes the LED to steady
 red and silences the buzzer**. With no alert, the LED is **steady blue** and silent. The meal's risk
-and exposure remain recorded; **Reset session** clears them. A later unacknowledged
+and exposure remain recorded until the meal or session is reset. A later unacknowledged
 alert triggers the hardware again.
-No risk thresholds, engine events, vision rules, or shared types are changed.
+Risk thresholds and contact/vision rules are unchanged.
 
 ## Wiring
 
@@ -20,8 +20,8 @@ an **active buzzer module with a 3.3 V-compatible signal input**.
 | GPIO 25 | 220–330 ohm resistor → LED blue leg |
 | GND | LED common cathode and buzzer module GND |
 | GPIO 33 | Buzzer module signal input |
-| GPIO 32 | One side of a normally-open momentary session reset button |
-| GND | Other side of the reset button |
+| GPIO 32 | One side of a normally-open momentary alert button |
+| GND | Other side of the alert button |
 | Module-rated supply | Buzzer module VCC |
 
 Use one resistor per LED colour. Check the LED's pinout; leg order varies.
@@ -34,28 +34,31 @@ A bare two-wire active buzzer needs a suitable transistor driver if its current
 exceeds the GPIO rating (and a flyback diode for an inductive buzzer). A passive
 piezo needs a tone/PWM driver instead of this sketch's on/off buzzer output.
 
-## Physical session reset button
+## Physical alert button
 
 Connect a **normally-open momentary button between GPIO 32 and GND**. The sketch
 uses `INPUT_PULLUP`, so no external pull-up resistor is needed. With a four-leg
 tactile switch, use two contacts that are disconnected when released and connected
 when pressed; two legs on the same side are often permanently joined.
 
-Upload the updated sketch and refresh/reconnect the app over **Bluetooth**. Press
-the physical button to run **the same reset handler as the website's Reset session
-button**. It stops any simulated replay, leaves simulated mode, and dispatches the
-existing manual `session-reset` event. Active exposure, alerts and wash state are
-cleared, while the dashboard's displayed event log keeps entries from previous
-sessions and records the reset. The allergen-source origin is recreated, and the hardware becomes
-**steady blue and silent**. It works during red flashing, acknowledged steady red,
-or normal blue operation. Live contacts after reset are tracked as a fresh session.
+Refresh/reconnect the app over **Bluetooth**. With the current button firmware:
+
+1. While flashing red and beeping, **press once** to acknowledge: steady red, silent.
+2. While steady red, **press again** to reset only the meal: steady blue, silent.
+
+The second press dispatches `meal-reset` for the meal being replaced. Hands, tongs,
+allergen-source exposure, wash state, session, camera, simulated mode/replay and
+existing logs are retained. Both actions append to the event log. Cleared meal
+records stay in history. If exposed hands or tongs touch the new meal, the existing
+contact rules raise a fresh unacknowledged alert. Pressing while blue does nothing.
+The website's **Reset session** continues to reset the entire session.
 
 The input is debounced for 40 ms and sends one notification per press. Holding it
-does not repeatedly reset the session. Presses with a missing connection do nothing. The physical button
+does not repeatedly trigger actions. Presses with a missing connection do nothing. The physical button
 uses Bluetooth; USB fallback still supports light/buzzer output and the on-screen
-reset button. Previous button firmware's `GT:ACK` notification also triggers a reset
-in the updated app, but only sends while an unacknowledged alert is active. Upload
-the new firmware to reset in every connected state.
+reset button. Previous button firmware's `GT:ACK` notification also uses this action,
+but older firmware that only sends during unacknowledged alerts must be updated to
+support the second press. The current `GT:RESET` button firmware needs no re-upload.
 
 ## Bluetooth setup (default)
 
@@ -106,8 +109,8 @@ BLE writes time out after three seconds and release the connection on failure.
 The button notifies **GT:RESET** on characteristic
 **b584b403-7e4b-4ec3-b6c4-781203a99270**. The app subscribes before sending the initial
 verdict, accepts button notifications only while connected, and removes the listener
-on disconnect. The button invokes the website's reset callback; after the engine
-starts a fresh session, the app sends **GT:IDLE** for blue and silent output.
+on disconnect. The first press acknowledges pending alerts and sends **GT:ACKED**.
+The next press resets only the meal and sends **GT:IDLE** for blue and silent output.
 
 USB fallback uses **115200 baud**, newline-delimited ASCII:
 

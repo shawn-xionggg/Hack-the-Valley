@@ -125,7 +125,7 @@ export function App() {
           <p className="scope-note">{SCOPE_NOTE}</p>
         </section>
 
-        <EspConnectionPanel engine={engine} onReset={reset} />
+        <EspConnectionPanel engine={engine} />
 
         {/* Operator-only controls stay out of the way: the worker's own action (replacing tongs) is under the cards. */}
         <details className="panel controls-panel">

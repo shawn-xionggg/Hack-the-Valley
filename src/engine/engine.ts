@@ -1,4 +1,4 @@
-import { DEFAULT_TUNING, ORDERS, UTENSILS } from "../shared/config";
+import { DEFAULT_TUNING, ORDERS, SURFACES, UTENSILS } from "../shared/config";
 import type { Order, Tuning, UtensilId } from "../shared/config";
 import type { Alert, ChainStep, CreateEngine, EngineState, LogEffect, SurfaceStatus } from "../shared/engine-types";
 import type { GhostEvent } from "../shared/events";
@@ -38,10 +38,13 @@ function alertChain(state: EngineState, recordId: string): ChainStep[] {
   return [...result.chain, ...washes].sort((x, y) => time(x) - time(y));
 }
 
-/** Step 4 of §3.5: at most one alert per meal per allergen per session. */
+/** At most one alert per meal per allergen until that meal is reset. */
 function raiseAlerts(state: EngineState, event: GhostEvent, orders: Order[]) {
   for (const order of orders) for (const allergen of order.allergies) {
-    const id = `alert:${order.mealId}:${allergen}`;
+    const reset = [...state.log].reverse().find(entry => entry.effect === "applied" &&
+      entry.event.kind === "meal-reset" && entry.event.mealId === order.mealId);
+    // A replacement meal needs a fresh identity for acknowledgement and dashboard chimes.
+    const id = `alert:${order.mealId}:${allergen}${reset ? `:after:${reset.event.id}` : ""}`;
     if (state.alerts.some(alert => alert.id === id)) continue;
     const record = state.records.find(r =>
       r.surfaceId === order.mealId && r.allergen === allergen && r.clearedByEventId === null);
@@ -105,6 +108,20 @@ function reduce(state: EngineState, event: GhostEvent, ctx: Context): EngineStat
       alert.acknowledged = true;
       alert.acknowledgedAt = event.t;
       return log("applied");
+    }
+    case "meal-reset": {
+      if (SURFACES[event.mealId]?.kind !== "meal") return log("no-change");
+      let changed = false;
+      for (const record of next.records) {
+        if (record.surfaceId === event.mealId && record.clearedByEventId === null) {
+          record.clearedByEventId = event.id;
+          changed = true;
+        }
+      }
+      const alerts = next.alerts.filter(alert => alert.mealId !== event.mealId);
+      changed ||= alerts.length !== next.alerts.length;
+      next.alerts = alerts;
+      return deriveSurfaces(log(changed ? "applied" : "no-change"));
     }
     case "session-reset": {
       const fresh = createObjectRegistry(ctx.nextSessionId());

@@ -3,8 +3,9 @@ import { EspAlerts } from "./esp-alerts";
 import type { EspConnectionStatus, EspSerial } from "./esp-alerts";
 import { EspBluetoothAlerts } from "./esp-bluetooth";
 import type { EspBluetooth } from "./esp-bluetooth";
+import { handleEspButton } from "./esp-button";
 
-export function mountEspPanel(container: HTMLElement, engine: Engine, onReset: () => void): () => void {
+export function mountEspPanel(container: HTMLElement, engine: Engine): () => void {
   let disposed = false;
   container.innerHTML = `
     <div class="zone-actions engine-actions esp-config">
@@ -34,7 +35,7 @@ export function mountEspPanel(container: HTMLElement, engine: Engine, onReset: (
   const usb = new EspAlerts(serial, next => report("usb", next));
   const bluetoothApi = (navigator as Navigator & { bluetooth?: EspBluetooth }).bluetooth;
   const bluetooth = new EspBluetoothAlerts(bluetoothApi, next => report("bluetooth", next),
-    onReset);
+    () => handleEspButton(engine));
   const update = (state: ReturnType<Engine["getState"]>) => {
     usb.update(state); bluetooth.update(state);
   };

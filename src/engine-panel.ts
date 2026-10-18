@@ -55,6 +55,7 @@ function eventText({ event, effect }: LoggedEvent): string {
     : event.kind === "utensil-washed" ? "Tongs washed · zone dwell"
     : event.kind === "utensil-replaced-confirmed" ? "Tongs replaced (confirmed)"
     : event.kind === "alert-acknowledged" ? "Alert acknowledged"
+    : event.kind === "meal-reset" ? "Meal reset"
     : "Session reset";
   return `Last event: ${what} · ${effect.replaceAll("-", " ")} · ${event.source}`;
 }
@@ -110,7 +111,7 @@ export function mountEnginePanel(container: HTMLElement): EnginePanel {
     <p class="hint" id="engine-last">No events yet. Exposure is inferred from camera geometry; it is not an allergen test.</p>
     <div id="esp-panel" aria-label="ESP hardware alerts"></div>`;
   const el = (id: string) => container.querySelector<HTMLElement>(`#${id}`)!;
-  mountEspPanel(el("esp-panel"), engine, resetSession);
+  mountEspPanel(el("esp-panel"), engine);
 
   function card(state: EngineState, id: ExposableSurfaceId): HTMLElement {
     const { status } = state.surfaces[id];
@@ -170,7 +171,7 @@ export function mountEnginePanel(container: HTMLElement): EnginePanel {
     if (alert.acknowledged) {
       const done = document.createElement("p");
       done.className = "alert-action";
-      done.textContent = `Acknowledged at ${clock(alert.acknowledgedAt ?? alert.t)}. The meal stays on hold until the session is reset.`;
+      done.textContent = `Acknowledged at ${clock(alert.acknowledgedAt ?? alert.t)}. The meal stays on hold until the meal or session is reset.`;
       node.append(done);
     } else {
       const ack = document.createElement("button");

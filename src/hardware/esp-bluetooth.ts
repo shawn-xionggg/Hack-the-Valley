@@ -42,9 +42,9 @@ export class EspBluetoothAlerts {
     const value = this.resetButton?.value;
     if (!value || value.byteLength > 32) return;
     const text = new TextDecoder().decode(value).trim();
-    // Existing button firmware emitted GT:ACK; keep it usable as a reset too.
+    // Both firmware versions report one physical button press.
     if (text === "GT:RESET" || text === "GT:ACK") {
-      this.onReset();
+      this.onPress();
     }
   };
   private readonly onDisconnected = () => {
@@ -55,7 +55,7 @@ export class EspBluetoothAlerts {
 
   constructor(private readonly bluetooth: EspBluetooth | undefined,
     private readonly onStatus: (status: EspConnectionStatus) => void,
-    private readonly onReset: () => void = () => {}) {
+    private readonly onPress: () => void = () => {}) {
     this.phase = bluetooth ? "disconnected" : "unsupported";
     this.report(this.phase, bluetooth ? "ESP not connected. Connect via Bluetooth and select GhostTrace-ESP." :
       "Bluetooth unavailable. Use desktop Chrome or Edge on localhost or HTTPS with Bluetooth enabled.");
@@ -102,7 +102,7 @@ export class EspBluetoothAlerts {
       const initial = this.command;
       await this.write(characteristic, initial);
       if (generation !== this.generation) return;
-      this.report("connected", "ESP Bluetooth connected — the physical button resets the session.");
+      this.report("connected", "ESP Bluetooth connected — press to acknowledge; press again to reset the meal.");
       if (this.command !== initial) this.send();
       this.heartbeat = setInterval(() => this.send(), 1000);
     } catch (error) {

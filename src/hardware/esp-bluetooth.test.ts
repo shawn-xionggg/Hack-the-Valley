@@ -4,6 +4,7 @@ import { MOVING_TONGS_SCRIPT } from "../sim/fixtures";
 import { ESP_BLE_RESET, ESP_BLE_COMMAND, ESP_BLE_SERVICE, EspBluetoothAlerts } from "./esp-bluetooth";
 import type { EspBleDevice, EspBleServer, EspBluetooth } from "./esp-bluetooth";
 import type { EspConnectionStatus } from "./esp-alerts";
+import { handleEspButton } from "./esp-button";
 
 class FakeCharacteristic extends EventTarget {
   value?: DataView;
@@ -50,9 +51,7 @@ function rig() {
   const requestDevice = vi.fn<EspBluetooth["requestDevice"]>(async () => device);
   const statuses: EspConnectionStatus[] = [];
   const engine = createEngine();
-  const onReset = vi.fn(() => engine.dispatch({
-    kind: "session-reset", id: crypto.randomUUID(), t: performance.now(), source: "manual",
-  }));
+  const onReset = vi.fn(() => handleEspButton(engine));
   const ble = new EspBluetoothAlerts({ requestDevice }, status => statuses.push(status),
     onReset);
   bridges.push(ble);
@@ -198,26 +197,48 @@ it("handles browsers without Web Bluetooth", async () => {
   expect(statuses.at(-1)?.phase).toBe("unsupported");
 });
 
-it("resets the full session from the physical button and sends the blue/silent output", async () => {
+it("acknowledges on the first press and resets only the meal on the second press", async () => {
   const { ble, device, engine, onReset } = rig();
   await ble.connect();
   for (const event of MOVING_TONGS_SCRIPT.events.filter(event => event.kind !== "alert-acknowledged")) engine.dispatch(event);
   await settle();
-  const session = engine.getState().sessionId;
+  const before = engine.getState();
   expect(engine.getState().alerts[0]?.acknowledged).toBe(false);
   device.resetButton.notify("GT:RESET\n");
-  const after = engine.getState();
+  const acknowledged = engine.getState();
   expect(onReset).toHaveBeenCalledOnce();
-  expect(after.sessionId).not.toBe(session);
+  expect(acknowledged.alerts[0]?.acknowledged).toBe(true);
+  expect(acknowledged.surfaces).toEqual(before.surfaces);
+  expect(acknowledged.records).toEqual(before.records);
+  await settle();
+  expect(device.lines.at(-1)).toBe("GT:ACKED\n");
+  device.resetButton.notify("GT:RESET\n");
+  const after = engine.getState();
+  expect(after.sessionId).toBe(before.sessionId);
   expect(after.alerts).toEqual([]);
-  expect(after.log).toHaveLength(1);
-  expect(after.log[0]?.event).toMatchObject({ kind: "session-reset", source: "manual" });
-  expect(after.records.every(record => record.kind === "origin")).toBe(true);
+  expect(after.log.slice(0, before.log.length)).toEqual(before.log);
+  expect(after.log).toHaveLength(before.log.length + 2);
+  expect(after.log.at(-1)?.event).toMatchObject({ kind: "meal-reset", mealId: "meal-1", source: "manual" });
   expect(after.surfaces["meal-1"].status).toBe("no-tracked-exposure");
-  expect(after.surfaces["tongs-tip"].status).toBe("no-tracked-exposure");
-  expect(after.lastWash).toBeNull();
+  for (const id of ["hands", "tongs-tip", "tongs-handle", "peanut-source"] as const) {
+    expect(after.surfaces[id]).toEqual(before.surfaces[id]);
+  }
+  expect(after.records.filter(record => record.surfaceId !== "meal-1"))
+    .toEqual(before.records.filter(record => record.surfaceId !== "meal-1"));
+  expect(after.lastWash).toEqual(before.lastWash);
+  expect(after.lastUtensilWash).toEqual(before.lastUtensilWash);
   await settle();
   expect(device.lines.at(-1)).toBe("GT:IDLE\n");
+  const oldAlertId = before.alerts[0]!.id;
+  engine.dispatch({ kind: "contact", a: "tongs-tip", b: "meal-1", confidence: 1,
+    id: "new-meal-contact", t: 15000, source: "camera" });
+  await settle();
+  expect(device.lines.at(-1)).toBe("GT:ALERT\n");
+  expect(engine.getState().alerts[0]?.acknowledged).toBe(false);
+  expect(engine.getState().alerts[0]?.id).not.toBe(oldAlertId);
+  engine.dispatch({ kind: "alert-acknowledged", alertId: oldAlertId,
+    id: "stale-ack", t: 16000, source: "manual" });
+  expect(engine.getState().alerts[0]?.acknowledged).toBe(false);
 });
 
 it("keeps acknowledged alerts silent across heartbeats/reconnect and re-arms for a new session alert", async () => {
@@ -243,20 +264,22 @@ it("keeps acknowledged alerts silent across heartbeats/reconnect and re-arms for
   expect(engine.getState().alerts[0]?.acknowledged).toBe(false);
 });
 
-it("resets without a meal alert and after an alert was acknowledged", async () => {
+it("does nothing without a meal alert and accepts legacy button notifications", async () => {
   const { ble, device, engine, onReset } = rig();
   await ble.connect();
   for (const event of MOVING_TONGS_SCRIPT.events.slice(0, 2)) engine.dispatch(event);
   expect(engine.getState().alerts).toHaveLength(0);
   expect(engine.getState().surfaces["tongs-tip"].status).toBe("potential-exposure");
+  const before = engine.getState();
   device.resetButton.notify("GT:RESET\n");
-  expect(engine.getState().surfaces["tongs-tip"].status).toBe("no-tracked-exposure");
+  expect(engine.getState()).toBe(before);
   for (const event of MOVING_TONGS_SCRIPT.events) engine.dispatch(event);
   expect(engine.getState().alerts[0]?.acknowledged).toBe(true);
-  // Previous firmware's GT:ACK button notification also performs a full reset.
+  // Previous firmware's GT:ACK notification uses the same two-step action.
   device.resetButton.notify("GT:ACK\n");
   expect(engine.getState().alerts).toHaveLength(0);
   expect(engine.getState().surfaces["meal-1"].status).toBe("no-tracked-exposure");
+  expect(engine.getState().surfaces["tongs-tip"].status).toBe("potential-exposure");
   expect(onReset).toHaveBeenCalledTimes(2);
 });
 

@@ -2,7 +2,7 @@
 // Engine state is a pure function of the ordered event log: replaying the same
 // events always produces the same state. Spec: GhostTrace-summary-v5.md.
 
-import type { ContactTarget, Polygon, ToolContactTarget, ToolSurface, UtensilId } from "./config";
+import type { ContactTarget, MealId, Polygon, ToolContactTarget, ToolSurface, UtensilId } from "./config";
 
 export type EventSource = "camera" | "manual" | "sim";
 export type WashMethod = "zone-dwell" | "motion" | "manual-tap" | "manual-voice";
@@ -66,6 +66,13 @@ export interface AlertAcknowledgedEvent extends EventBase {
   source: "manual" | "sim";
 }
 
+/** Reset one meal for replacement, retaining other surfaces and the event history. */
+export interface MealResetEvent extends EventBase {
+  kind: "meal-reset";
+  mealId: MealId;
+  source: "manual" | "sim";
+}
+
 /** Start a fresh demo run: clears all state, alerts, and history; starts a new session. */
 export interface SessionResetEvent extends EventBase {
   kind: "session-reset";
@@ -78,6 +85,7 @@ export type GhostEvent =
   | UtensilWashedEvent
   | UtensilReplacedEvent
   | AlertAcknowledgedEvent
+  | MealResetEvent
   | SessionResetEvent;
 
 export type GhostEventKind = GhostEvent["kind"];

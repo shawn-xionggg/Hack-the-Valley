@@ -85,7 +85,7 @@ export const MANUAL_WASH_BUTTON = "Confirm hands washed with soap and water";
 export const MANUAL_WASH_NOTE = "Fallback for when camera wash detection isn't reliable (spec §4.5).";
 
 export const CORRECTIVE_ACTION ="Hold this meal and prepare a replacement with appropriate allergen controls.";
-export const ACK_NOTE = "Acknowledged. The meal stays on hold until the session is reset.";
+export const ACK_NOTE = "Acknowledged. The meal stays on hold until the meal or session is reset.";
 export const SCOPE_NOTE =
   "Exposure is inferred from 2D camera geometry. GhostTrace does not test for allergens and does not confirm cleaning.";
 
@@ -127,6 +127,8 @@ export function eventText({ event }: LoggedEvent): string {
       return "Alert acknowledged";
     case "session-reset":
       return "Session reset";
+    case "meal-reset":
+      return "Meal reset";
   }
 }
 

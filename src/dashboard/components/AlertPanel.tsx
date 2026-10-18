@@ -9,7 +9,7 @@ interface Props {
 
 export function AlertPanel({ alerts, onAcknowledge }: Props) {
   if (!alerts.length) {
-    return <p className="empty-note">No alerts this session. An alert is raised when tracked exposure reaches a meal whose order declares that allergy.</p>;
+    return <p className="empty-note">No active alerts. An alert is raised when tracked exposure reaches a meal whose order declares that allergy.</p>;
   }
   // Newest first: during a demo the alert that just fired is the one to explain.
   return <>{[...alerts].reverse().map(alert => <AlertCard key={alert.id} alert={alert} onAcknowledge={onAcknowledge} />)}</>;
