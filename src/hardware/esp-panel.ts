@@ -3,6 +3,7 @@ import { EspAlerts } from "./esp-alerts";
 import type { EspConnectionStatus, EspSerial } from "./esp-alerts";
 import { EspBluetoothAlerts } from "./esp-bluetooth";
 import type { EspBluetooth } from "./esp-bluetooth";
+import { acknowledgeHardwareAlerts } from "./acknowledge-alerts";
 
 export function mountEspPanel(container: HTMLElement, engine: Engine): void {
   container.innerHTML = `
@@ -31,7 +32,8 @@ export function mountEspPanel(container: HTMLElement, engine: Engine): void {
   const serial = (navigator as Navigator & { serial?: EspSerial }).serial;
   const usb = new EspAlerts(serial, next => report("usb", next));
   const bluetoothApi = (navigator as Navigator & { bluetooth?: EspBluetooth }).bluetooth;
-  const bluetooth = new EspBluetoothAlerts(bluetoothApi, next => report("bluetooth", next));
+  const bluetooth = new EspBluetoothAlerts(bluetoothApi, next => report("bluetooth", next),
+    () => acknowledgeHardwareAlerts(engine));
   const update = (state: ReturnType<Engine["getState"]>) => {
     usb.update(state); bluetooth.update(state);
   };

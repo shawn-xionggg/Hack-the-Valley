@@ -1,9 +1,11 @@
 # ESP32 light and buzzer
 
-The browser reads the existing `EngineState.surfaces[*].status`. If any surface is
-`action-required`, the ESP flashes **red on and off** and beeps on red.
-Otherwise it shows steady **blue** and stays silent. Acknowledgement, hand washing,
-and utensil replacement do not clear an existing meal alert; **Reset session** does.
+The browser reads existing meal alerts and `EngineState.surfaces[*].status`. While
+there is an **unacknowledged** alert on an `action-required` meal, the ESP flashes
+**red on and off** and beeps on red. **Acknowledgement turns off the red flashes
+and buzzer**, returning the hardware to steady **blue** and silent. The meal's risk
+and exposure remain recorded; **Reset session** clears them. A later unacknowledged
+alert triggers the hardware again.
 No risk thresholds, engine events, vision rules, or shared types are changed.
 
 ## Wiring
@@ -18,6 +20,8 @@ an **active buzzer module with a 3.3 V-compatible signal input**.
 | GPIO 27 | 220–330 ohm resistor → LED blue leg |
 | GND | LED common cathode and buzzer module GND |
 | GPIO 33 | Buzzer module signal input |
+| GPIO 32 | One side of a normally-open momentary acknowledge button |
+| GND | Other side of the acknowledge button |
 | Module-rated supply | Buzzer module VCC |
 
 Use one resistor per LED colour. Check the LED's pinout; leg order varies.
@@ -29,6 +33,26 @@ These defaults do not target ESP32-C3/S3 boards; select GPIOs available on your 
 A bare two-wire active buzzer needs a suitable transistor driver if its current
 exceeds the GPIO rating (and a flyback diode for an inductive buzzer). A passive
 piezo needs a tone/PWM driver instead of this sketch's on/off buzzer output.
+
+## Physical acknowledge button
+
+Connect a **normally-open momentary button between GPIO 32 and GND**. The sketch
+uses `INPUT_PULLUP`, so no external pull-up resistor is needed. With a four-leg
+tactile switch, use two contacts that are disconnected when released and connected
+when pressed; two legs on the same side are often permanently joined.
+
+Upload the updated sketch and refresh/reconnect the app over **Bluetooth**. While
+an alert is flashing red, press the button once: the app marks every currently
+unacknowledged alert as acknowledged, using the same `alert-acknowledged` event as
+the on-screen button. **The red flashes and buzzer turn off**, just as they do when
+acknowledging on screen. The meal stays on hold until session reset. Pressing during either
+the lit or dark part of the flash cycle works.
+
+The input is debounced for 40 ms and sends one notification per press. Holding it
+does not repeatedly acknowledge or automatically acknowledge a later alert. Presses
+without an active alert or with a missing connection do nothing. The physical button
+uses Bluetooth; USB fallback still supports light/buzzer output and the on-screen
+acknowledgement button. Older firmware must be re-uploaded to add button notifications.
 
 ## Bluetooth setup (default)
 
@@ -44,9 +68,10 @@ its normal Wi-Fi/internet connection. No IP address or router configuration is n
    Under **Exposure tracking**, select **Bluetooth** and click **Connect ESP**.
 4. In the browser's Bluetooth chooser, select **GhostTrace-ESP** and connect.
    Select it through the app, rather than pairing it in Windows Bluetooth settings.
-5. The LED turns blue when connected with no action-required alert. **Replay Act 2**
+5. The LED turns blue when connected with no unacknowledged alert. **Replay Act 2**
    triggers red-only flashes and the active buzzer when the meal gets an alert.
-   Acknowledgement leaves the alert active; **Reset session** returns it to blue.
+   Acknowledgement returns the LED to blue and silences the buzzer. The meal's
+   recorded risk remains until **Reset session**.
 
 The browser uses **Bluetooth Low Energy (BLE)**, not Bluetooth Classic serial.
 The classic ESP32/WROOM boards support this. ESP32-S2 has no Bluetooth; other board
@@ -72,6 +97,11 @@ the text commands below using acknowledged GATT writes, serializing writes and
 coalescing pending updates to the latest verdict. The firmware validates BLE input
 and queues it for the main loop; the BLE task never writes GPIOs or engine state.
 BLE writes time out after three seconds and release the connection on failure.
+The button notifies **GT:ACK** on characteristic
+**b584b403-7e4b-4ec3-b6c4-781203a99270**. The app subscribes before sending the initial
+verdict, accepts notifications only while connected with an active verdict, and
+removes the listener on disconnect. The resulting acknowledgement sends **GT:IDLE**
+to stop red flashing and the buzzer. Button events never directly clear exposure.
 
 USB fallback uses **115200 baud**, newline-delimited ASCII:
 

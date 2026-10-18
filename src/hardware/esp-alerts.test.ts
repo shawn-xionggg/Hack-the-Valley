@@ -46,26 +46,26 @@ function rig() {
 }
 
 describe("ESP output uses the existing engine verdict", () => {
-  it("matches every fixture's action-required status, without mutating engine state", () => {
+  it("alerts only for unacknowledged meal alerts, without mutating engine state", () => {
     for (const scenario of SCENARIOS) {
       const engine = createEngine({ orders: scenario.orders });
       for (const event of scenario.events) {
         const state = engine.dispatch(event);
         const before = structuredClone(state);
-        const expected = Object.values(state.surfaces).some(s => s.status === "action-required");
+        const expected = state.alerts.some(alert => !alert.acknowledged);
         expect(espCommand(state)).toBe(expected ? "GT:ALERT\n" : "GT:IDLE\n");
         expect(state).toEqual(before);
       }
     }
   });
 
-  it.each([DEMO_SCRIPT, MOVING_TONGS_SCRIPT])("drives $name and stays active through acknowledgement, wash and replacement", async script => {
+  it.each([DEMO_SCRIPT, MOVING_TONGS_SCRIPT])("drives $name, stays active through wash/replacement, and silences on acknowledgement", async script => {
     const { bridge, engine, port } = rig();
     await bridge.connect();
     await settle();
     expect(port.open).toHaveBeenCalledWith({ baudRate: 115200 });
     expect(port.lines).toEqual(["GT:IDLE\n"]);
-    for (const event of script.events) {
+    for (const event of script.events.filter(event => event.kind !== "alert-acknowledged")) {
       engine.dispatch(event);
       await settle();
     }
@@ -75,6 +75,11 @@ describe("ESP output uses the existing engine verdict", () => {
     }
     await settle();
     expect(port.lines.at(-1)).toBe("GT:ALERT\n");
+    engine.dispatch({ kind: "alert-acknowledged", alertId: engine.getState().alerts[0]!.id,
+      id: "acknowledge", t: 9000, source: "manual" });
+    await settle();
+    expect(port.lines.at(-1)).toBe("GT:IDLE\n");
+    expect(engine.getState().surfaces["meal-1"].status).toBe("action-required");
     engine.dispatch({ kind: "session-reset", id: "reset", t: 10000, source: "manual" });
     await settle();
     expect(port.lines.at(-1)).toBe("GT:IDLE\n");
@@ -83,7 +88,7 @@ describe("ESP output uses the existing engine verdict", () => {
   it("resends current risk on connection and every second after ESP boot/reset", async () => {
     vi.useFakeTimers();
     const { bridge, engine, port } = rig();
-    for (const event of MOVING_TONGS_SCRIPT.events) engine.dispatch(event);
+    for (const event of MOVING_TONGS_SCRIPT.events.filter(event => event.kind !== "alert-acknowledged")) engine.dispatch(event);
     await bridge.connect();
     await settle();
     expect(port.lines).toEqual(["GT:ALERT\n"]);
@@ -103,7 +108,7 @@ describe("ESP output uses the existing engine verdict", () => {
     let release!: () => void;
     port.holdWrite = new Promise<void>(resolve => { release = resolve; });
     await bridge.connect();
-    for (const event of MOVING_TONGS_SCRIPT.events) engine.dispatch(event);
+    for (const event of MOVING_TONGS_SCRIPT.events.filter(event => event.kind !== "alert-acknowledged")) engine.dispatch(event);
     engine.dispatch({ kind: "session-reset", id: "reset", t: 10000, source: "manual" });
     release();
     await settle();
@@ -127,7 +132,7 @@ describe("ESP output uses the existing engine verdict", () => {
     await settle();
     expect(statuses.at(-1)?.phase).toBe("error");
     expect(port.writable.locked).toBe(false);
-    for (const event of MOVING_TONGS_SCRIPT.events) engine.dispatch(event);
+    for (const event of MOVING_TONGS_SCRIPT.events.filter(event => event.kind !== "alert-acknowledged")) engine.dispatch(event);
     await bridge.connect();
     await settle();
     expect(port.lines.at(-1)).toBe("GT:ALERT\n");
@@ -139,7 +144,7 @@ describe("ESP output uses the existing engine verdict", () => {
     await bridge.connect();
     await settle();
     port.failWrite = true;
-    for (const event of MOVING_TONGS_SCRIPT.events) expect(() => engine.dispatch(event)).not.toThrow();
+    for (const event of MOVING_TONGS_SCRIPT.events.filter(event => event.kind !== "alert-acknowledged")) expect(() => engine.dispatch(event)).not.toThrow();
     await settle();
     expect(engine.getState().surfaces["meal-1"].status).toBe("action-required");
     expect(statuses.at(-1)?.phase).toBe("error");

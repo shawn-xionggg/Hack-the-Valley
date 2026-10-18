@@ -75,8 +75,9 @@ The vision module follows the [MediaPipe Web hand landmark API](https://ai.googl
 Connect an ESP32 with an RGB LED and active buzzer over **Bluetooth** using **Connect ESP**
 under Exposure tracking. Keep your laptop's normal Wi-Fi connection. Upload the firmware
 once over USB, then power the board from a power bank or USB supply. USB serial is
-also available as a fallback. Existing `action-required` status drives red flashes
-and beeping; session reset returns the output to blue and silent. See
+also available as a fallback. Unacknowledged alerts on `action-required` meals drive
+red flashes and beeping. Acknowledgement returns the output to blue and silent while
+the meal stays on hold; session reset clears its tracked risk. See
 [hardware setup, firmware and demo steps](hardware/README.md).
 
 ## Check

@@ -5,9 +5,12 @@ import type { EspConnectionStatus } from "./esp-alerts";
 // These UUIDs identify GhostTrace's BLE service and command characteristic.
 export const ESP_BLE_SERVICE = "b584b401-7e4b-4ec3-b6c4-781203a99270";
 export const ESP_BLE_COMMAND = "b584b402-7e4b-4ec3-b6c4-781203a99270";
+export const ESP_BLE_ACK = "b584b403-7e4b-4ec3-b6c4-781203a99270";
 
-export interface EspBleCharacteristic {
+export interface EspBleCharacteristic extends EventTarget {
+  readonly value?: DataView;
   writeValueWithResponse(value: Uint8Array): Promise<void>;
+  startNotifications(): Promise<unknown>;
 }
 export interface EspBleServer {
   connected: boolean;
@@ -25,6 +28,7 @@ export class EspBluetoothAlerts {
   private phase: EspConnectionStatus["phase"];
   private device: EspBleDevice | undefined;
   private characteristic: EspBleCharacteristic | undefined;
+  private acknowledgement: EspBleCharacteristic | undefined;
   private heartbeat: ReturnType<typeof setInterval> | undefined;
   private pending: Promise<void> = Promise.resolve();
   private command = "GT:IDLE\n";
@@ -32,6 +36,13 @@ export class EspBluetoothAlerts {
   private dirty = false;
   private generation = 0;
   private readonly encoder = new TextEncoder();
+  private readonly onButton = (event: Event) => {
+    if (this.phase !== "connected" || this.command !== "GT:ALERT\n" || event.target !== this.acknowledgement) return;
+    const value = this.acknowledgement?.value;
+    if (value && value.byteLength <= 32 && new TextDecoder().decode(value).trim() === "GT:ACK") {
+      this.onAcknowledge();
+    }
+  };
   private readonly onDisconnected = () => {
     if (this.phase === "connecting" || this.phase === "connected") {
       this.fail(new Error("Bluetooth disconnected. Check ESP power and reconnect."));
@@ -39,7 +50,8 @@ export class EspBluetoothAlerts {
   };
 
   constructor(private readonly bluetooth: EspBluetooth | undefined,
-    private readonly onStatus: (status: EspConnectionStatus) => void) {
+    private readonly onStatus: (status: EspConnectionStatus) => void,
+    private readonly onAcknowledge: () => void = () => {}) {
     this.phase = bluetooth ? "disconnected" : "unsupported";
     this.report(this.phase, bluetooth ? "ESP not connected. Connect via Bluetooth and select GhostTrace-ESP." :
       "Bluetooth unavailable. Use desktop Chrome or Edge on localhost or HTTPS with Bluetooth enabled.");
@@ -72,10 +84,21 @@ export class EspBluetoothAlerts {
       const characteristic = await service.getCharacteristic(ESP_BLE_COMMAND);
       if (generation !== this.generation) return;
       this.characteristic = characteristic;
+      let acknowledgement: EspBleCharacteristic;
+      try {
+        acknowledgement = await service.getCharacteristic(ESP_BLE_ACK);
+      } catch {
+        throw new Error("Button notifications are unavailable. Upload the latest ESP32 firmware, then reconnect.");
+      }
+      if (generation !== this.generation) return;
+      this.acknowledgement = acknowledgement;
+      this.acknowledgement.addEventListener("characteristicvaluechanged", this.onButton);
+      await this.acknowledgement.startNotifications();
+      if (generation !== this.generation) return;
       const initial = this.command;
       await this.write(characteristic, initial);
       if (generation !== this.generation) return;
-      this.report("connected", "ESP Bluetooth connected — lights and buzzer follow Action required.");
+      this.report("connected", "ESP Bluetooth connected — acknowledgement turns off red flashes and the buzzer.");
       if (this.command !== initial) this.send();
       this.heartbeat = setInterval(() => this.send(), 1000);
     } catch (error) {
@@ -133,6 +156,8 @@ export class EspBluetoothAlerts {
     ++this.generation;
     clearInterval(this.heartbeat);
     this.heartbeat = undefined;
+    this.acknowledgement?.removeEventListener("characteristicvaluechanged", this.onButton);
+    this.acknowledgement = undefined;
     this.device?.removeEventListener("gattserverdisconnected", this.onDisconnected);
     this.device?.gatt?.disconnect();
     this.device = undefined;

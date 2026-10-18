@@ -1,14 +1,33 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { createEngine } from "../engine";
 import { MOVING_TONGS_SCRIPT } from "../sim/fixtures";
-import { ESP_BLE_COMMAND, ESP_BLE_SERVICE, EspBluetoothAlerts } from "./esp-bluetooth";
+import { ESP_BLE_ACK, ESP_BLE_COMMAND, ESP_BLE_SERVICE, EspBluetoothAlerts } from "./esp-bluetooth";
 import type { EspBleDevice, EspBleServer, EspBluetooth } from "./esp-bluetooth";
 import type { EspConnectionStatus } from "./esp-alerts";
+import { acknowledgeHardwareAlerts } from "./acknowledge-alerts";
+
+class FakeCharacteristic extends EventTarget {
+  value?: DataView;
+  constructor(private readonly onWrite: (value: Uint8Array) => void = () => {}) { super(); }
+  writeValueWithResponse = vi.fn(async (value: Uint8Array) => { this.onWrite(value); });
+  startNotifications = vi.fn(async () => {});
+  notify(text: string) {
+    const bytes = new TextEncoder().encode(text);
+    this.value = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    this.dispatchEvent(new Event("characteristicvaluechanged"));
+  }
+}
 
 class FakeDevice extends EventTarget implements EspBleDevice {
   lines: string[] = [];
-  write = vi.fn(async (value: Uint8Array) => { this.lines.push(new TextDecoder().decode(value)); });
-  getCharacteristic = vi.fn(async (_uuid: string) => ({ writeValueWithResponse: this.write }));
+  commandCharacteristic = new FakeCharacteristic(value => { this.lines.push(new TextDecoder().decode(value)); });
+  acknowledgement = new FakeCharacteristic();
+  write = this.commandCharacteristic.writeValueWithResponse;
+  getCharacteristic = vi.fn(async (uuid: string) => {
+    if (uuid === ESP_BLE_COMMAND) return this.commandCharacteristic;
+    if (uuid === ESP_BLE_ACK) return this.acknowledgement;
+    throw new Error("Unknown characteristic");
+  });
   gatt: EspBleServer = {
     connected: false,
     connect: vi.fn(async () => { this.gatt.connected = true; return this.gatt; }),
@@ -31,9 +50,10 @@ function rig() {
   const device = new FakeDevice();
   const requestDevice = vi.fn<EspBluetooth["requestDevice"]>(async () => device);
   const statuses: EspConnectionStatus[] = [];
-  const ble = new EspBluetoothAlerts({ requestDevice }, status => statuses.push(status));
-  bridges.push(ble);
   const engine = createEngine();
+  const ble = new EspBluetoothAlerts({ requestDevice }, status => statuses.push(status),
+    () => acknowledgeHardwareAlerts(engine));
+  bridges.push(ble);
   ble.update(engine.getState());
   engine.subscribe(state => ble.update(state));
   return { ble, device, requestDevice, statuses, engine };
@@ -45,14 +65,17 @@ it("selects the GhostTrace BLE service and sends the existing risk verdict", asy
   expect(requestDevice).toHaveBeenCalledWith({ filters: [{ services: [ESP_BLE_SERVICE] }] });
   expect(device.gatt.getPrimaryService).toHaveBeenCalledWith(ESP_BLE_SERVICE);
   expect(device.getCharacteristic).toHaveBeenCalledWith(ESP_BLE_COMMAND);
+  expect(device.getCharacteristic).toHaveBeenCalledWith(ESP_BLE_ACK);
+  expect(device.acknowledgement.startNotifications).toHaveBeenCalledOnce();
   expect(statuses.at(-1)?.phase).toBe("connected");
   expect(device.lines).toEqual(["GT:IDLE\n"]);
   for (const event of MOVING_TONGS_SCRIPT.events) {
     engine.dispatch(event);
     await settle();
   }
-  // The script includes acknowledgement; the alert and hardware output remain active.
-  expect(device.lines).toEqual(["GT:IDLE\n", "GT:ALERT\n"]);
+  // Scripted acknowledgement silences hardware while the meal remains on hold.
+  expect(device.lines).toEqual(["GT:IDLE\n", "GT:ALERT\n", "GT:IDLE\n"]);
+  expect(engine.getState().surfaces["meal-1"].status).toBe("action-required");
   engine.dispatch({ kind: "session-reset", id: "reset", t: 10000, source: "manual" });
   await settle();
   expect(device.lines.at(-1)).toBe("GT:IDLE\n");
@@ -61,7 +84,7 @@ it("selects the GhostTrace BLE service and sends the existing risk verdict", asy
 it("sends an existing alert on connection, repeats it, and sends idle before disconnect", async () => {
   vi.useFakeTimers();
   const { ble, device, engine, statuses } = rig();
-  for (const event of MOVING_TONGS_SCRIPT.events) engine.dispatch(event);
+  for (const event of MOVING_TONGS_SCRIPT.events.filter(event => event.kind !== "alert-acknowledged")) engine.dispatch(event);
   await ble.connect();
   await vi.advanceTimersByTimeAsync(2000);
   expect(device.lines).toEqual(["GT:ALERT\n", "GT:ALERT\n", "GT:ALERT\n"]);
@@ -78,7 +101,7 @@ it("sends a changed verdict after a slow connection write finishes", async () =>
   device.write.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
   const connecting = ble.connect();
   await settle();
-  for (const event of MOVING_TONGS_SCRIPT.events) engine.dispatch(event);
+  for (const event of MOVING_TONGS_SCRIPT.events.filter(event => event.kind !== "alert-acknowledged")) engine.dispatch(event);
   release();
   await connecting;
   await settle();
@@ -90,7 +113,7 @@ it("coalesces slow BLE writes and sends the latest verdict", async () => {
   await ble.connect();
   let release!: () => void;
   device.write.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
-  for (const event of MOVING_TONGS_SCRIPT.events) engine.dispatch(event);
+  for (const event of MOVING_TONGS_SCRIPT.events.filter(event => event.kind !== "alert-acknowledged")) engine.dispatch(event);
   engine.dispatch({ kind: "session-reset", id: "reset", t: 10000, source: "manual" });
   release();
   await settle();
@@ -121,7 +144,7 @@ it("reports BLE disconnection, stops heartbeats, and reconnects with the current
   device.gatt.disconnect();
   expect(statuses.at(-1)?.phase).toBe("error");
   expect(vi.getTimerCount()).toBe(0);
-  for (const event of MOVING_TONGS_SCRIPT.events) engine.dispatch(event);
+  for (const event of MOVING_TONGS_SCRIPT.events.filter(event => event.kind !== "alert-acknowledged")) engine.dispatch(event);
   await ble.connect();
   expect(device.lines.at(-1)).toBe("GT:ALERT\n");
   expect(statuses.at(-1)?.phase).toBe("connected");
@@ -131,7 +154,7 @@ it("contains write failures without interrupting engine dispatch", async () => {
   const { ble, device, engine, statuses } = rig();
   await ble.connect();
   device.write.mockRejectedValueOnce(new Error("GATT write failed"));
-  for (const event of MOVING_TONGS_SCRIPT.events) expect(() => engine.dispatch(event)).not.toThrow();
+  for (const event of MOVING_TONGS_SCRIPT.events.filter(event => event.kind !== "alert-acknowledged")) expect(() => engine.dispatch(event)).not.toThrow();
   await settle();
   expect(engine.getState().surfaces["meal-1"].status).toBe("action-required");
   expect(statuses.at(-1)?.phase).toBe("error");
@@ -156,7 +179,7 @@ it("ignores failures from an old connection after reconnecting", async () => {
   await ble.connect();
   let rejectOld!: (reason: Error) => void;
   device.write.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectOld = reject; }));
-  for (const event of MOVING_TONGS_SCRIPT.events) engine.dispatch(event);
+  for (const event of MOVING_TONGS_SCRIPT.events.filter(event => event.kind !== "alert-acknowledged")) engine.dispatch(event);
   device.gatt.disconnect();
   await ble.connect();
   rejectOld(new Error("Old connection failed"));
@@ -171,4 +194,84 @@ it("handles browsers without Web Bluetooth", async () => {
   await ble.connect();
   ble.update(createEngine().getState());
   expect(statuses.at(-1)?.phase).toBe("unsupported");
+});
+
+it("acknowledges an alert from the physical button and silences hardware without clearing exposure", async () => {
+  const { ble, device, engine } = rig();
+  await ble.connect();
+  for (const event of MOVING_TONGS_SCRIPT.events.filter(event => event.kind !== "alert-acknowledged")) engine.dispatch(event);
+  await settle();
+  const before = structuredClone(engine.getState());
+  expect(before.alerts[0]?.acknowledged).toBe(false);
+  device.acknowledgement.notify("GT:ACK\n");
+  const after = engine.getState();
+  expect(after.alerts[0]?.acknowledged).toBe(true);
+  expect(after.log.at(-1)?.event).toMatchObject({ kind: "alert-acknowledged", source: "manual" });
+  expect(after.surfaces).toEqual(before.surfaces);
+  expect(after.records).toEqual(before.records);
+  await settle();
+  expect(device.lines.at(-1)).toBe("GT:IDLE\n");
+  const count = after.log.length;
+  device.acknowledgement.notify("GT:ACK\n");
+  expect(engine.getState().log).toHaveLength(count);
+});
+
+it("keeps acknowledged alerts silent across heartbeats/reconnect and re-arms for a new session alert", async () => {
+  vi.useFakeTimers();
+  const { ble, device, engine } = rig();
+  await ble.connect();
+  for (const event of MOVING_TONGS_SCRIPT.events.filter(event => event.kind !== "alert-acknowledged")) engine.dispatch(event);
+  await settle();
+  device.acknowledgement.notify("GT:ACK\n");
+  await settle();
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(device.lines.slice(-3)).toEqual(["GT:IDLE\n", "GT:IDLE\n", "GT:IDLE\n"]);
+  engine.dispatch({ kind: "wash", id: "post-ack-wash", t: 8000, source: "manual", method: "manual-tap", verified: false });
+  expect(engine.getState().surfaces["meal-1"].status).toBe("action-required");
+  device.gatt.disconnect();
+  await ble.connect();
+  expect(device.lines.at(-1)).toBe("GT:IDLE\n");
+  engine.dispatch({ kind: "session-reset", id: "reset", t: 10000, source: "manual" });
+  for (const event of MOVING_TONGS_SCRIPT.events.filter(event => event.kind !== "alert-acknowledged")) engine.dispatch(event);
+  await settle();
+  expect(device.lines.at(-1)).toBe("GT:ALERT\n");
+  expect(engine.getState().alerts[0]?.acknowledged).toBe(false);
+});
+
+it("ignores button notifications without an alert and after session reset", async () => {
+  const { ble, device, engine } = rig();
+  await ble.connect();
+  device.acknowledgement.notify("GT:ACK\n");
+  expect(engine.getState().log).toHaveLength(0);
+  for (const event of MOVING_TONGS_SCRIPT.events) engine.dispatch(event);
+  engine.dispatch({ kind: "session-reset", id: "reset", t: 10000, source: "manual" });
+  const count = engine.getState().log.length;
+  device.acknowledgement.notify("GT:ACK\n");
+  expect(engine.getState().log).toHaveLength(count);
+});
+
+it("ignores malformed or disconnected button notifications", async () => {
+  const { ble, device, engine } = rig();
+  await ble.connect();
+  for (const event of MOVING_TONGS_SCRIPT.events.filter(event => event.kind !== "alert-acknowledged")) engine.dispatch(event);
+  await settle();
+  device.acknowledgement.notify("GT:RESET\n");
+  device.acknowledgement.notify("x".repeat(64));
+  expect(engine.getState().alerts[0]?.acknowledged).toBe(false);
+  device.gatt.disconnect();
+  device.acknowledgement.notify("GT:ACK\n");
+  expect(engine.getState().alerts[0]?.acknowledged).toBe(false);
+});
+
+it("reports outdated firmware and notification subscription failures", async () => {
+  const { ble, device, statuses } = rig();
+  device.getCharacteristic.mockImplementationOnce(async () => device.commandCharacteristic)
+    .mockRejectedValueOnce(new Error("Characteristic missing"));
+  await ble.connect();
+  expect(statuses.at(-1)?.phase).toBe("error");
+  expect(statuses.at(-1)?.message).toContain("Upload the latest ESP32 firmware");
+  device.acknowledgement.startNotifications.mockRejectedValueOnce(new Error("Subscription failed"));
+  await ble.connect();
+  expect(statuses.at(-1)?.phase).toBe("error");
+  expect(device.gatt.connected).toBe(false);
 });

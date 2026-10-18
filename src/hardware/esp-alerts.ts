@@ -15,9 +15,10 @@ export interface EspSerial extends EventTarget {
 type Phase = "unsupported" | "disconnected" | "connecting" | "connected" | "disconnecting" | "error";
 export interface EspConnectionStatus { phase: Phase; message: string }
 
-/** Read the engine's existing verdict. Never dispatches events or evaluates contacts. */
+/** Sound/flash only for unacknowledged engine alerts. Acknowledgement silences
+ * hardware without clearing the engine's exposure or action-required status. */
 export function espCommand(state: EngineState): string {
-  return Object.values(state.surfaces).some(surface => surface.status === "action-required")
+  return state.alerts.some(alert => !alert.acknowledged && state.surfaces[alert.mealId].status === "action-required")
     ? "GT:ALERT\n" : "GT:IDLE\n";
 }
 
@@ -63,7 +64,7 @@ export class EspAlerts {
       this.writer = this.port.writable.getWriter();
       this.port.addEventListener("disconnect", this.onUnplug);
       this.serial.addEventListener("disconnect", this.onUnplug);
-      this.report("connected", "ESP USB connected — lights and buzzer follow Action required.");
+      this.report("connected", "ESP USB connected — acknowledgement turns off red flashes and the buzzer.");
       this.send();
       // Re-send after USB auto-reset/boot and keep the firmware's link timer alive.
       this.heartbeat = setInterval(() => this.send(), 1000);

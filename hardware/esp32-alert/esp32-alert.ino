@@ -5,13 +5,16 @@
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
+#include <BLE2902.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <atomic>
 constexpr const char *BLE_SERVICE_UUID = "b584b401-7e4b-4ec3-b6c4-781203a99270";
 constexpr const char *BLE_COMMAND_UUID = "b584b402-7e4b-4ec3-b6c4-781203a99270";
+constexpr const char *BLE_ACK_UUID = "b584b403-7e4b-4ec3-b6c4-781203a99270";
 QueueHandle_t bleCommands = nullptr;
 BLEServer *bleServer = nullptr;
+BLECharacteristic *bleAcknowledgement = nullptr;
 std::atomic<bool> restartBleAdvertising{false};
 bool bleRestartPending = false;
 unsigned long bleRestartAt = 0;
@@ -21,6 +24,8 @@ constexpr uint8_t RED_PIN = 25;
 constexpr uint8_t GREEN_PIN = 26;
 constexpr uint8_t BLUE_PIN = 27;
 constexpr uint8_t BUZZER_PIN = 33;
+constexpr uint8_t ACK_BUTTON_PIN = 32; // Momentary button between this pin and GND.
+constexpr unsigned long BUTTON_DEBOUNCE_MS = 40;
 constexpr bool COMMON_ANODE = false;
 // Default: active buzzer module with a 3.3 V-compatible signal input.
 constexpr bool BUZZER_ACTIVE_HIGH = true;
@@ -34,6 +39,9 @@ unsigned long alertStartedAt = 0;
 char line[24];
 size_t lineLength = 0;
 bool overflow = false;
+int buttonRaw = HIGH;
+int buttonStable = HIGH;
+unsigned long buttonChangedAt = 0;
 
 void rgb(bool red, bool green, bool blue) {
   digitalWrite(RED_PIN, red != COMMON_ANODE ? HIGH : LOW);
@@ -96,6 +104,8 @@ void startBluetooth() {
   BLEService *service = bleServer->createService(BLE_SERVICE_UUID);
   BLECharacteristic *characteristic = service->createCharacteristic(BLE_COMMAND_UUID, BLECharacteristic::PROPERTY_WRITE);
   characteristic->setCallbacks(new AlertBleCallbacks());
+  bleAcknowledgement = service->createCharacteristic(BLE_ACK_UUID, BLECharacteristic::PROPERTY_NOTIFY);
+  bleAcknowledgement->addDescriptor(new BLE2902());
   service->start();
   BLEAdvertising *advertising = BLEDevice::getAdvertising();
   advertising->addServiceUUID(BLE_SERVICE_UUID);
@@ -120,11 +130,31 @@ void pollBluetooth() {
   }
 }
 
+void pollAcknowledgeButton(unsigned long now) {
+  const int raw = digitalRead(ACK_BUTTON_PIN);
+  if (raw != buttonRaw) {
+    buttonRaw = raw;
+    buttonChangedAt = now;
+  }
+  if (buttonStable == raw || now - buttonChangedAt < BUTTON_DEBOUNCE_MS) return;
+  buttonStable = raw;
+  // Only a new press during an active, connected alert counts. Holding the button
+  // never acknowledges a future alert. The browser owns acknowledgement state.
+  if (raw == LOW && alertActive && receivedCommand && now - lastCommandAt <= LINK_TIMEOUT_MS &&
+      bleAcknowledgement && bleServer->getConnectedCount() > 0) {
+    bleAcknowledgement->setValue("GT:ACK\n");
+    bleAcknowledgement->notify();
+    Serial.println("Physical acknowledge button pressed.");
+  }
+}
+
 void setup() {
   pinMode(RED_PIN, OUTPUT);
   pinMode(GREEN_PIN, OUTPUT);
   pinMode(BLUE_PIN, OUTPUT);
   pinMode(BUZZER_PIN, OUTPUT);
+  pinMode(ACK_BUTTON_PIN, INPUT_PULLUP);
+  buttonRaw = buttonStable = digitalRead(ACK_BUTTON_PIN);
   rgb(false, false, false);
   buzzer(false);
   Serial.begin(115200);
@@ -150,6 +180,7 @@ void loop() {
   }
 
   const unsigned long now = millis();
+  pollAcknowledgeButton(now);
   if (!receivedCommand || now - lastCommandAt > LINK_TIMEOUT_MS) {
     // Lost app connection: steady amber, silent.
     rgb(true, true, false);
@@ -160,7 +191,7 @@ void loop() {
     rgb(phase == 0 || phase == 2, false, false);
     buzzer(phase == 0);
   } else {
-    // No action-required verdict: neutral blue, silent.
+    // No unacknowledged alert: neutral blue, silent.
     rgb(false, false, true);
     buzzer(false);
   }
