@@ -53,7 +53,7 @@ describe("ESP output uses the existing engine verdict", () => {
         const state = engine.dispatch(event);
         const before = structuredClone(state);
         const expected = state.alerts.some(alert => !alert.acknowledged);
-        expect(espCommand(state)).toBe(expected ? "GT:ALERT\n" : "GT:IDLE\n");
+        expect(espCommand(state)).toBe(expected ? "GT:ALERT\n" : state.alerts.length ? "GT:ACKED\n" : "GT:IDLE\n");
         expect(state).toEqual(before);
       }
     }
@@ -78,7 +78,7 @@ describe("ESP output uses the existing engine verdict", () => {
     engine.dispatch({ kind: "alert-acknowledged", alertId: engine.getState().alerts[0]!.id,
       id: "acknowledge", t: 9000, source: "manual" });
     await settle();
-    expect(port.lines.at(-1)).toBe("GT:IDLE\n");
+    expect(port.lines.at(-1)).toBe("GT:ACKED\n");
     expect(engine.getState().surfaces["meal-1"].status).toBe("action-required");
     engine.dispatch({ kind: "session-reset", id: "reset", t: 10000, source: "manual" });
     await settle();

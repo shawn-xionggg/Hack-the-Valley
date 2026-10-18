@@ -31,8 +31,12 @@ constexpr bool COMMON_ANODE = false;
 constexpr bool BUZZER_ACTIVE_HIGH = true;
 constexpr unsigned long LINK_TIMEOUT_MS = 5000;
 constexpr unsigned long FLASH_MS = 250;
+constexpr uint8_t MODE_IDLE = 0;
+constexpr uint8_t MODE_ALERT = 1;
+constexpr uint8_t MODE_ACKED = 2;
 
 bool alertActive = false;
+bool outputsAcknowledged = false;
 bool receivedCommand = false;
 unsigned long lastCommandAt = 0;
 unsigned long alertStartedAt = 0;
@@ -53,18 +57,28 @@ void buzzer(bool on) {
   digitalWrite(BUZZER_PIN, on == BUZZER_ACTIVE_HIGH ? HIGH : LOW);
 }
 
-void command(const char *text) {
-  bool nextAlert;
-  if (strcmp(text, "GT:ALERT") == 0) nextAlert = true;
-  else if (strcmp(text, "GT:IDLE") == 0) nextAlert = false;
-  else return; // Ignore unrelated or malformed serial input.
+int parseCommand(const char *text) {
+  if (strcmp(text, "GT:ALERT") == 0) return MODE_ALERT;
+  if (strcmp(text, "GT:IDLE") == 0) return MODE_IDLE;
+  if (strcmp(text, "GT:ACKED") == 0) return MODE_ACKED;
+  return -1;
+}
+
+void applyCommand(uint8_t mode) {
+  const bool nextAlert = mode == MODE_ALERT;
   const unsigned long now = millis();
   if (nextAlert && (!alertActive || !receivedCommand || now - lastCommandAt > LINK_TIMEOUT_MS)) {
     alertStartedAt = now;
   }
   alertActive = nextAlert;
+  outputsAcknowledged = mode == MODE_ACKED;
   receivedCommand = true;
   lastCommandAt = now;
+}
+
+void command(const char *text) {
+  const int mode = parseCommand(text);
+  if (mode >= 0) applyCommand(static_cast<uint8_t>(mode));
 }
 
 class AlertBleCallbacks : public BLECharacteristicCallbacks {
@@ -78,11 +92,11 @@ class AlertBleCallbacks : public BLECharacteristicCallbacks {
     memcpy(text, value.c_str(), length);
     while (length && (text[length - 1] == '\n' || text[length - 1] == '\r')) --length;
     text[length] = '\0';
-    bool nextAlert;
-    if (length == 8 && strcmp(text, "GT:ALERT") == 0) nextAlert = true;
-    else if (length == 7 && strcmp(text, "GT:IDLE") == 0) nextAlert = false;
-    else return;
-    xQueueOverwrite(bleCommands, &nextAlert);
+    if (strlen(text) != length) return;
+    const int mode = parseCommand(text);
+    if (mode < 0) return;
+    const uint8_t nextMode = static_cast<uint8_t>(mode);
+    xQueueOverwrite(bleCommands, &nextMode);
   }
 };
 
@@ -93,7 +107,7 @@ class AlertBleServerCallbacks : public BLEServerCallbacks {
 };
 
 void startBluetooth() {
-  bleCommands = xQueueCreate(1, sizeof(bool));
+  bleCommands = xQueueCreate(1, sizeof(uint8_t));
   if (!bleCommands) {
     Serial.println("BLE command queue could not be created; reset the ESP.");
     return;
@@ -115,9 +129,9 @@ void startBluetooth() {
 }
 
 void pollBluetooth() {
-  bool nextAlert;
-  if (bleCommands && xQueueReceive(bleCommands, &nextAlert, 0) == pdTRUE) {
-    command(nextAlert ? "GT:ALERT" : "GT:IDLE");
+  uint8_t nextMode;
+  if (bleCommands && xQueueReceive(bleCommands, &nextMode, 0) == pdTRUE) {
+    applyCommand(nextMode);
   }
   if (restartBleAdvertising.exchange(false)) {
     bleRestartAt = millis();
@@ -190,8 +204,12 @@ void loop() {
     // Red, off, red, off. Beep on the first red flash of each cycle.
     rgb(phase == 0 || phase == 2, false, false);
     buzzer(phase == 0);
+  } else if (outputsAcknowledged) {
+    // The app has acknowledged the alert: every LED channel off, buzzer silent.
+    rgb(false, false, false);
+    buzzer(false);
   } else {
-    // No unacknowledged alert: neutral blue, silent.
+    // No alert in this session: neutral blue, silent.
     rgb(false, false, true);
     buzzer(false);
   }

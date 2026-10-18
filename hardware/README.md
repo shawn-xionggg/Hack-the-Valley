@@ -3,7 +3,7 @@
 The browser reads existing meal alerts and `EngineState.surfaces[*].status`. While
 there is an **unacknowledged** alert on an `action-required` meal, the ESP flashes
 **red on and off** and beeps on red. **Acknowledgement turns off the red flashes
-and buzzer**, returning the hardware to steady **blue** and silent. The meal's risk
+and buzzer**, leaving **all LED colours off** and the buzzer silent. The meal's risk
 and exposure remain recorded; **Reset session** clears them. A later unacknowledged
 alert triggers the hardware again.
 No risk thresholds, engine events, vision rules, or shared types are changed.
@@ -44,7 +44,7 @@ when pressed; two legs on the same side are often permanently joined.
 Upload the updated sketch and refresh/reconnect the app over **Bluetooth**. While
 an alert is flashing red, press the button once: the app marks every currently
 unacknowledged alert as acknowledged, using the same `alert-acknowledged` event as
-the on-screen button. **The red flashes and buzzer turn off**, just as they do when
+the on-screen button. **Every LED colour and the buzzer turn off**, just as they do when
 acknowledging on screen. The meal stays on hold until session reset. Pressing during either
 the lit or dark part of the flash cycle works.
 
@@ -68,9 +68,9 @@ its normal Wi-Fi/internet connection. No IP address or router configuration is n
    Under **Exposure tracking**, select **Bluetooth** and click **Connect ESP**.
 4. In the browser's Bluetooth chooser, select **GhostTrace-ESP** and connect.
    Select it through the app, rather than pairing it in Windows Bluetooth settings.
-5. The LED turns blue when connected with no unacknowledged alert. **Replay Act 2**
+5. The LED turns blue when connected with no alert. **Replay Act 2**
    triggers red-only flashes and the active buzzer when the meal gets an alert.
-   Acknowledgement returns the LED to blue and silences the buzzer. The meal's
+   Acknowledgement switches the entire LED off and silences the buzzer. The meal's
    recorded risk remains until **Reset session**.
 
 The browser uses **Bluetooth Low Energy (BLE)**, not Bluetooth Classic serial.
@@ -100,18 +100,24 @@ BLE writes time out after three seconds and release the connection on failure.
 The button notifies **GT:ACK** on characteristic
 **b584b403-7e4b-4ec3-b6c4-781203a99270**. The app subscribes before sending the initial
 verdict, accepts notifications only while connected with an active verdict, and
-removes the listener on disconnect. The resulting acknowledgement sends **GT:IDLE**
-to stop red flashing and the buzzer. Button events never directly clear exposure.
+removes the listener on disconnect. The resulting acknowledgement sends **GT:ACKED**
+to turn off all LED channels and the buzzer. Button events never directly clear exposure.
 
 USB fallback uses **115200 baud**, newline-delimited ASCII:
 
 ```text
 GT:ALERT
 GT:IDLE
+GT:ACKED
 ```
 
 The browser sends the latest verdict immediately when it changes, on connection,
-and every second. After a Bluetooth disconnect or ESP reboot, click **Connect ESP**
+including the acknowledged/off state. **GT:IDLE** shows neutral blue after session
+reset; **GT:ACKED** keeps the LED completely off after acknowledgement. Upload the
+updated firmware so the ESP understands **GT:ACKED**.
+
+The browser repeats the current command every second. After a Bluetooth disconnect
+or ESP reboot, click **Connect ESP**
 again; the current verdict is sent on reconnection. Failures appear in the app
 and can be retried with **Connect ESP**. The sketch ignores invalid commands and
 processes received commands in its main loop while flashing.

@@ -18,8 +18,9 @@ export interface EspConnectionStatus { phase: Phase; message: string }
 /** Sound/flash only for unacknowledged engine alerts. Acknowledgement silences
  * hardware without clearing the engine's exposure or action-required status. */
 export function espCommand(state: EngineState): string {
-  return state.alerts.some(alert => !alert.acknowledged && state.surfaces[alert.mealId].status === "action-required")
-    ? "GT:ALERT\n" : "GT:IDLE\n";
+  const alerts = state.alerts.filter(alert => state.surfaces[alert.mealId].status === "action-required");
+  if (alerts.some(alert => !alert.acknowledged)) return "GT:ALERT\n";
+  return alerts.length ? "GT:ACKED\n" : "GT:IDLE\n";
 }
 
 export class EspAlerts {

@@ -74,7 +74,7 @@ it("selects the GhostTrace BLE service and sends the existing risk verdict", asy
     await settle();
   }
   // Scripted acknowledgement silences hardware while the meal remains on hold.
-  expect(device.lines).toEqual(["GT:IDLE\n", "GT:ALERT\n", "GT:IDLE\n"]);
+  expect(device.lines).toEqual(["GT:IDLE\n", "GT:ALERT\n", "GT:ACKED\n"]);
   expect(engine.getState().surfaces["meal-1"].status).toBe("action-required");
   engine.dispatch({ kind: "session-reset", id: "reset", t: 10000, source: "manual" });
   await settle();
@@ -210,7 +210,7 @@ it("acknowledges an alert from the physical button and silences hardware without
   expect(after.surfaces).toEqual(before.surfaces);
   expect(after.records).toEqual(before.records);
   await settle();
-  expect(device.lines.at(-1)).toBe("GT:IDLE\n");
+  expect(device.lines.at(-1)).toBe("GT:ACKED\n");
   const count = after.log.length;
   device.acknowledgement.notify("GT:ACK\n");
   expect(engine.getState().log).toHaveLength(count);
@@ -225,12 +225,12 @@ it("keeps acknowledged alerts silent across heartbeats/reconnect and re-arms for
   device.acknowledgement.notify("GT:ACK\n");
   await settle();
   await vi.advanceTimersByTimeAsync(2000);
-  expect(device.lines.slice(-3)).toEqual(["GT:IDLE\n", "GT:IDLE\n", "GT:IDLE\n"]);
+  expect(device.lines.slice(-3)).toEqual(["GT:ACKED\n", "GT:ACKED\n", "GT:ACKED\n"]);
   engine.dispatch({ kind: "wash", id: "post-ack-wash", t: 8000, source: "manual", method: "manual-tap", verified: false });
   expect(engine.getState().surfaces["meal-1"].status).toBe("action-required");
   device.gatt.disconnect();
   await ble.connect();
-  expect(device.lines.at(-1)).toBe("GT:IDLE\n");
+  expect(device.lines.at(-1)).toBe("GT:ACKED\n");
   engine.dispatch({ kind: "session-reset", id: "reset", t: 10000, source: "manual" });
   for (const event of MOVING_TONGS_SCRIPT.events.filter(event => event.kind !== "alert-acknowledged")) engine.dispatch(event);
   await settle();
