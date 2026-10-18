@@ -39,6 +39,19 @@ describe("stable camera acquisition", () => {
     expect(selectBackCamera([device("ultra", "Back Ultra Wide Camera")])?.deviceId).toBe("ultra");
   });
 
+  it("prefers a Continuity Camera iPhone over the built-in camera and its Desk View", () => {
+    expect(selectBackCamera([device("mac", "MacBook Pro Camera"), device("desk", "lucas’s iPhone Desk View Camera"),
+      device("iphone", "lucas’s iPhone Camera")])?.deviceId).toBe("iphone");
+    expect(selectBackCamera([device("mac", "MacBook Pro Camera"), device("desk", "iPhone Desk View Camera")])).toBeUndefined();
+  });
+
+  it("opens a labelled Continuity Camera directly, without a probe stream", async () => {
+    const { media } = rig([device("mac", "MacBook Pro Camera"), device("iphone", "lucas’s iPhone Camera")]);
+    await openStableCamera(media);
+    expect(media.getUserMedia).toHaveBeenCalledOnce();
+    expect(media.getUserMedia.mock.calls[0]?.[0].video).toMatchObject({ deviceId: { exact: "iphone" } });
+  });
+
   it("opens only the manually selected camera without discovery or a rear-camera probe", async () => {
     const { media } = rig();
     await openStableCamera(media, "front");

@@ -1,11 +1,17 @@
 type CameraDevices = Pick<MediaDevices, "enumerateDevices" | "getUserMedia">;
 
-/** Prefer the physical main rear lens over ultra-wide, telephoto, and combined cameras. */
+/**
+ * Prefer the physical main rear lens over ultra-wide, telephoto, and combined cameras.
+ * On a Mac, an iPhone used as a Continuity Camera is one device labelled "<name>’s iPhone
+ * Camera" (no back/rear in the label), so prefer it over the built-in camera and over its
+ * ultra-wide "Desk View" device. Its lens choice is made by macOS, not the browser.
+ */
 export function selectBackCamera(devices: MediaDeviceInfo[]): MediaDeviceInfo | undefined {
-  const back = devices.filter(device => device.kind === "videoinput" && device.deviceId &&
-    /\b(back|rear|environment)\b/i.test(device.label));
+  const cameras = devices.filter(device => device.kind === "videoinput" && device.deviceId);
+  const back = cameras.filter(device => /\b(back|rear|environment)\b/i.test(device.label));
   const physical = back.filter(device => !/ultra|0[.,]5\s*[x×]|telephoto|\btele\b|\bdual\b|\btriple\b/i.test(device.label));
-  return physical.find(device => /\b(wide|main|primary)\b/i.test(device.label)) ?? physical[0] ?? back[0];
+  const continuity = cameras.find(device => /\biPhone\b/i.test(device.label) && !/desk\s*view/i.test(device.label));
+  return physical.find(device => /\b(wide|main|primary)\b/i.test(device.label)) ?? physical[0] ?? continuity ?? back[0];
 }
 
 /** Acquire a fixed camera before attaching video or starting tracking. */
