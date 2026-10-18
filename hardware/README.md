@@ -30,56 +30,50 @@ A bare two-wire active buzzer needs a suitable transistor driver if its current
 exceeds the GPIO rating (and a flyback diode for an inductive buzzer). A passive
 piezo needs a tone/PWM driver instead of this sketch's on/off buzzer output.
 
-## Wireless setup (default)
+## Bluetooth setup (default)
 
-1. In Arduino IDE, install **esp32 by Espressif Systems**, select your board and
-   USB port, and open `esp32-alert/esp32-alert.ino`. Upload the updated firmware
-   **once over USB**. WiFi and WebServer are included with the ESP32 board package;
-   no extra libraries are needed.
-2. Unplug the board from your laptop. Power its USB connector from a **power bank
-   or USB wall supply**. It still needs power, but the laptop connection is wireless.
-3. Start the app with `npm.cmd run dev` and open its localhost URL in desktop
-   Chrome or Edge. **Start the camera while your laptop still has internet** so
-   MediaPipe can download its model and WASM files before switching Wi-Fi networks.
-4. Join **GhostTrace-ESP** from your laptop's Wi-Fi settings, password
-   **ghosttrace32**. Stay connected even if Windows says there is no internet.
-   The app stays at its **localhost URL**; don't move the camera app to the ESP IP.
-5. Under **Exposure tracking**, select **Wi-Fi (wireless)**, leave the ESP address
-   at **http://192.168.4.1**, and click **Connect ESP**. Allow local-network access
-   if your browser asks. Blue means the app is connected with no action-required alert.
-6. Click **Replay Act 2 (simulated)**. Picking up the handle and dipping the tips
-   leave the LED blue. Serving onto the meal starts red flashes and beeping.
-   The scripted acknowledgement leaves those outputs active.
-7. Click **Reset session**: blue and silent. Live camera events use the same engine
-   subscription and hardware connection.
+Bluetooth Low Energy connects the app directly to the ESP32 while the laptop keeps
+its normal Wi-Fi/internet connection. No IP address or router configuration is needed.
 
-The ESP creates its own Wi-Fi network, so no venue router is required. It does not
-provide internet access. You can open **http://192.168.4.1/** in another tab to check
-that the board responds with `{"device":"ghosttrace-esp32","endpoint":"/alert"}`.
-Keep only one app tab connected to a board to avoid competing output commands.
+1. In Arduino IDE, select your ESP32 board and USB port, then upload the updated
+   **esp32-alert/esp32-alert.ino** once over USB. Install **esp32 by Espressif Systems**
+   if needed; its BLE library is included.
+2. Power the ESP32 from a **power bank or USB wall supply**. Turn on your laptop's
+   Bluetooth and keep its normal Wi-Fi connected.
+3. Open the app in **desktop Chrome or Edge** at its localhost URL (or HTTPS).
+   Under **Exposure tracking**, select **Bluetooth** and click **Connect ESP**.
+4. In the browser's Bluetooth chooser, select **GhostTrace-ESP** and connect.
+   Select it through the app, rather than pairing it in Windows Bluetooth settings.
+5. The LED turns blue when connected with no action-required alert. **Replay Act 2**
+   triggers red-only flashes and the active buzzer when the meal gets an alert.
+   Acknowledgement leaves the alert active; **Reset session** returns it to blue.
 
-### Use your existing Wi-Fi or phone hotspot instead
+The browser uses **Bluetooth Low Energy (BLE)**, not Bluetooth Classic serial.
+The classic ESP32/WROOM boards support this. ESP32-S2 has no Bluetooth; other board
+variants need their own GPIO selections. Web Bluetooth requires a supported browser,
+Bluetooth hardware enabled, and localhost or HTTPS. An unsupported browser shows an
+explanation in the app; USB is available as a fallback.
 
-Copy `esp32-alert/wifi-config.example.h` to **wifi-config.h** in the same folder,
-fill in the network name and password, and upload again. `wifi-config.h` is ignored
-by Git. Use a **2.4 GHz** network without a captive portal or client isolation.
-Connect the laptop to that same network. During setup, Serial Monitor at 115200
-baud prints **Router/hotspot ESP address** once connected; enter that address in
-the app. You can then unplug USB and power the board separately. Its own
-GhostTrace-ESP access point remains available as a fallback. A router-assigned IP
-can change after reboot; check the address or reserve it in your router.
+If the device is missing, upload this Bluetooth firmware, check its power, move it
+nearby, and disconnect it from other app tabs/devices. It only advertises the
+GhostTrace service with the updated firmware. After a disconnect it starts
+advertising again so **Connect ESP** can reconnect. Keep one app connected at a time.
 
-### USB fallback
+## USB fallback
 
 Connect the board to the laptop with a USB data cable, close Serial Monitor, select
 **USB serial** in the app, then click **Connect ESP** and select its COM port.
 
 ## Protocol and connection loss
 
-Wi-Fi sends **POST /alert** with `Content-Type: text/plain` and one of the commands
-below as the body. The board validates it and acknowledges the device identity and
-accepted command as JSON. CORS and OPTIONS responses allow the localhost app to
-communicate with the board. USB fallback uses **115200 baud**, newline-delimited ASCII:
+Bluetooth advertises service **b584b401-7e4b-4ec3-b6c4-781203a99270** with writable
+command characteristic **b584b402-7e4b-4ec3-b6c4-781203a99270**. The browser sends
+the text commands below using acknowledged GATT writes, serializing writes and
+coalescing pending updates to the latest verdict. The firmware validates BLE input
+and queues it for the main loop; the BLE task never writes GPIOs or engine state.
+BLE writes time out after three seconds and release the connection on failure.
+
+USB fallback uses **115200 baud**, newline-delimited ASCII:
 
 ```text
 GT:ALERT
@@ -87,26 +81,19 @@ GT:IDLE
 ```
 
 The browser sends the latest verdict immediately when it changes, on connection,
-and every second. This also restores the output after an ESP reboot. Requests time
-out after two seconds; failures appear in the app and can be retried with
-**Connect ESP**. The sketch ignores invalid commands. It serves HTTP requests from
-the main loop, so flashing continues between requests.
+and every second. After a Bluetooth disconnect or ESP reboot, click **Connect ESP**
+again; the current verdict is sent on reconnection. Failures appear in the app
+and can be retried with **Connect ESP**. The sketch ignores invalid commands and
+processes received commands in its main loop while flashing.
 
 Before the first command, or after five seconds without a valid command, the ESP
 shows **steady amber** and silences the buzzer to indicate a missing connection.
 The engine's risk state is unchanged. This can also happen if the browser tab is
 suspended or its timers are throttled; keep the demo tab visible. **Disconnect ESP**
-sends idle before stopping Wi-Fi requests or releasing USB. Reconnecting sends the engine's current verdict,
+sends idle before stopping requests and releasing Bluetooth/USB. Reconnecting sends the engine's current verdict,
 including an alert that was already active.
 
-For the direct ESP network, run the camera app from **localhost**. A remotely hosted
-HTTPS app's access to the board's HTTP endpoint depends on the browser's local-network
-and mixed-content rules; use localhost if the browser blocks it. Local-network
-permission must be allowed. Reconnecting the laptop to another Wi-Fi network can
-also break the link until you restore access to the ESP.
-
-Implementation references: [ESP32 Wi-Fi API](https://docs.espressif.com/projects/arduino-esp32/en/latest/api/wifi.html),
-[Espressif WebServer example](https://github.com/espressif/arduino-esp32/blob/master/libraries/WebServer/examples/HelloServer/HelloServer.ino),
-[Chrome local network access](https://developer.chrome.com/blog/local-network-access),
+Implementation references: [Chrome Web Bluetooth](https://developer.chrome.com/docs/capabilities/bluetooth),
+[Espressif BLE UART example](https://github.com/espressif/arduino-esp32/blob/master/libraries/BLE/examples/UART/UART.ino),
 [Chrome Web Serial](https://developer.chrome.com/docs/capabilities/serial)
 and [Espressif GPIO API](https://docs.espressif.com/projects/arduino-esp32/en/latest/api/gpio.html).

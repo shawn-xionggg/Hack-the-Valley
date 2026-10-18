@@ -1,13 +1,13 @@
 import type { Engine } from "../shared/engine-types";
 import { EspAlerts } from "./esp-alerts";
 import type { EspConnectionStatus, EspSerial } from "./esp-alerts";
-import { EspWifiAlerts } from "./esp-wifi";
+import { EspBluetoothAlerts } from "./esp-bluetooth";
+import type { EspBluetooth } from "./esp-bluetooth";
 
 export function mountEspPanel(container: HTMLElement, engine: Engine): void {
   container.innerHTML = `
     <div class="zone-actions engine-actions esp-config">
-      <label>ESP connection <select data-esp-mode><option value="wifi">Wi-Fi (wireless)</option><option value="usb">USB serial</option></select></label>
-      <label data-esp-address-label>ESP address <input data-esp-address type="text" value="http://192.168.4.1" placeholder="http://192.168.4.1" spellcheck="false" /></label>
+      <label>ESP connection <select data-esp-mode><option value="bluetooth">Bluetooth</option><option value="usb">USB serial</option></select></label>
     </div>
     <div class="zone-actions engine-actions">
       <button class="text-button" data-esp-connect>Connect ESP</button>
@@ -18,10 +18,6 @@ export function mountEspPanel(container: HTMLElement, engine: Engine): void {
   const disconnect = container.querySelector<HTMLButtonElement>("[data-esp-disconnect]")!;
   const status = container.querySelector<HTMLElement>("[data-esp-status]")!;
   const mode = container.querySelector<HTMLSelectElement>("[data-esp-mode]")!;
-  const address = container.querySelector<HTMLInputElement>("[data-esp-address]")!;
-  const addressLabel = container.querySelector<HTMLElement>("[data-esp-address-label]")!;
-  try { address.value = localStorage.getItem("ghosttrace.esp.address") ?? address.value; }
-  catch { /* A connection still works without storage. */ }
   const statuses = new Map<string, EspConnectionStatus>();
   function report(transport: string, next: EspConnectionStatus): void {
     statuses.set(transport, next);
@@ -30,24 +26,25 @@ export function mountEspPanel(container: HTMLElement, engine: Engine): void {
     connect.disabled = !["disconnected", "error"].includes(phase);
     disconnect.disabled = phase !== "connected";
     mode.disabled = ["connecting", "connected", "disconnecting"].includes(phase);
-    address.disabled = mode.disabled;
     status.textContent = message;
   }
   const serial = (navigator as Navigator & { serial?: EspSerial }).serial;
   const usb = new EspAlerts(serial, next => report("usb", next));
-  const wifi = new EspWifiAlerts(next => report("wifi", next));
-  const update = (state: ReturnType<Engine["getState"]>) => { usb.update(state); wifi.update(state); };
+  const bluetoothApi = (navigator as Navigator & { bluetooth?: EspBluetooth }).bluetooth;
+  const bluetooth = new EspBluetoothAlerts(bluetoothApi, next => report("bluetooth", next));
+  const update = (state: ReturnType<Engine["getState"]>) => {
+    usb.update(state); bluetooth.update(state);
+  };
   update(engine.getState());
   engine.subscribe(update);
   mode.addEventListener("change", () => {
-    addressLabel.hidden = mode.value !== "wifi";
     report(mode.value, statuses.get(mode.value)!);
   });
   connect.addEventListener("click", () => {
-    if (mode.value === "usb") { void usb.connect(); return; }
-    try { localStorage.setItem("ghosttrace.esp.address", address.value); }
-    catch { /* As above. */ }
-    void wifi.connect(address.value);
+    if (mode.value === "bluetooth") { void bluetooth.connect(); return; }
+    void usb.connect();
   });
-  disconnect.addEventListener("click", () => { void (mode.value === "wifi" ? wifi.disconnect() : usb.disconnect()); });
+  disconnect.addEventListener("click", () => {
+    void (mode.value === "bluetooth" ? bluetooth.disconnect() : usb.disconnect());
+  });
 }

@@ -1,20 +1,20 @@
 #include <Arduino.h>
 #include <string.h>
-#include <WiFi.h>
-#include <WebServer.h>
 
-// Optional: copy wifi-config.example.h to wifi-config.h to join your router/hotspot.
-#if __has_include("wifi-config.h")
-#include "wifi-config.h"
-#endif
-#ifndef GHOSTTRACE_WIFI_SSID
-#define GHOSTTRACE_WIFI_SSID ""
-#define GHOSTTRACE_WIFI_PASSWORD ""
-#endif
-constexpr const char *AP_SSID = "GhostTrace-ESP";
-constexpr const char *AP_PASSWORD = "ghosttrace32";
-WebServer server(80);
-bool printedStationIp = false;
+// Bluetooth alerts with USB serial as a fallback.
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/queue.h>
+#include <atomic>
+constexpr const char *BLE_SERVICE_UUID = "b584b401-7e4b-4ec3-b6c4-781203a99270";
+constexpr const char *BLE_COMMAND_UUID = "b584b402-7e4b-4ec3-b6c4-781203a99270";
+QueueHandle_t bleCommands = nullptr;
+BLEServer *bleServer = nullptr;
+std::atomic<bool> restartBleAdvertising{false};
+bool bleRestartPending = false;
+unsigned long bleRestartAt = 0;
 
 // Classic ESP32 DevKit defaults. Change these to match your wiring/board.
 constexpr uint8_t RED_PIN = 25;
@@ -59,53 +59,65 @@ void command(const char *text) {
   lastCommandAt = now;
 }
 
-void corsHeaders() {
-  server.sendHeader("Access-Control-Allow-Origin", "*");
-  server.sendHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
-  server.sendHeader("Access-Control-Allow-Private-Network", "true");
-  server.sendHeader("Cache-Control", "no-store");
+class AlertBleCallbacks : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *characteristic) override {
+    // BLE callbacks run on another task. Queue the latest command for loop(),
+    // which owns alert state and all GPIO writes.
+    const auto value = characteristic->getValue();
+    size_t length = value.length();
+    if (length == 0 || length >= 24) return;
+    char text[24];
+    memcpy(text, value.c_str(), length);
+    while (length && (text[length - 1] == '\n' || text[length - 1] == '\r')) --length;
+    text[length] = '\0';
+    bool nextAlert;
+    if (length == 8 && strcmp(text, "GT:ALERT") == 0) nextAlert = true;
+    else if (length == 7 && strcmp(text, "GT:IDLE") == 0) nextAlert = false;
+    else return;
+    xQueueOverwrite(bleCommands, &nextAlert);
+  }
+};
+
+class AlertBleServerCallbacks : public BLEServerCallbacks {
+  void onDisconnect(BLEServer *) override {
+    restartBleAdvertising.store(true);
+  }
+};
+
+void startBluetooth() {
+  bleCommands = xQueueCreate(1, sizeof(bool));
+  if (!bleCommands) {
+    Serial.println("BLE command queue could not be created; reset the ESP.");
+    return;
+  }
+  BLEDevice::init("GhostTrace-ESP");
+  bleServer = BLEDevice::createServer();
+  bleServer->setCallbacks(new AlertBleServerCallbacks());
+  BLEService *service = bleServer->createService(BLE_SERVICE_UUID);
+  BLECharacteristic *characteristic = service->createCharacteristic(BLE_COMMAND_UUID, BLECharacteristic::PROPERTY_WRITE);
+  characteristic->setCallbacks(new AlertBleCallbacks());
+  service->start();
+  BLEAdvertising *advertising = BLEDevice::getAdvertising();
+  advertising->addServiceUUID(BLE_SERVICE_UUID);
+  advertising->setScanResponse(true);
+  advertising->start();
+  Serial.println("Bluetooth ready: select GhostTrace-ESP in the app's Connect ESP chooser.");
 }
 
-void startWifi() {
-  WiFi.mode(strlen(GHOSTTRACE_WIFI_SSID) ? WIFI_AP_STA : WIFI_AP);
-  // Keep the direct connection available even if venue Wi-Fi is unavailable.
-  const IPAddress apIp(192, 168, 4, 1);
-  WiFi.softAPConfig(apIp, apIp, IPAddress(255, 255, 255, 0));
-  if (WiFi.softAP(AP_SSID, AP_PASSWORD)) {
-    Serial.print("Join GhostTrace-ESP Wi-Fi. ESP address: http://");
-    Serial.println(WiFi.softAPIP());
-  } else {
-    Serial.println("ESP Wi-Fi access point failed to start; reset the board.");
+void pollBluetooth() {
+  bool nextAlert;
+  if (bleCommands && xQueueReceive(bleCommands, &nextAlert, 0) == pdTRUE) {
+    command(nextAlert ? "GT:ALERT" : "GT:IDLE");
   }
-  if (strlen(GHOSTTRACE_WIFI_SSID)) {
-    WiFi.setAutoReconnect(true);
-    WiFi.begin(GHOSTTRACE_WIFI_SSID, GHOSTTRACE_WIFI_PASSWORD);
+  if (restartBleAdvertising.exchange(false)) {
+    bleRestartAt = millis();
+    bleRestartPending = true;
   }
-  server.on("/", HTTP_GET, []() {
-    corsHeaders();
-    server.send(200, "application/json", "{\"device\":\"ghosttrace-esp32\",\"endpoint\":\"/alert\"}");
-  });
-  server.on("/alert", HTTP_OPTIONS, []() {
-    corsHeaders();
-    server.send(204, "text/plain", "");
-  });
-  server.on("/alert", HTTP_POST, []() {
-    corsHeaders();
-    String body = server.arg("plain");
-    body.trim();
-    if (body != "GT:ALERT" && body != "GT:IDLE") {
-      server.send(400, "text/plain", "Expected GT:ALERT or GT:IDLE");
-      return;
-    }
-    command(body.c_str());
-    server.send(200, "application/json", String("{\"device\":\"ghosttrace-esp32\",\"command\":\"") + body + "\"}");
-  });
-  server.onNotFound([]() {
-    corsHeaders();
-    server.send(404, "text/plain", "Not found");
-  });
-  server.begin();
+  // Give the BLE stack time to close the previous connection without blocking.
+  if (bleRestartPending && millis() - bleRestartAt >= 500) {
+    if (bleServer->getConnectedCount() == 0) BLEDevice::startAdvertising();
+    bleRestartPending = false;
+  }
 }
 
 void setup() {
@@ -116,17 +128,11 @@ void setup() {
   rgb(false, false, false);
   buzzer(false);
   Serial.begin(115200);
-  startWifi();
+  startBluetooth();
 }
 
 void loop() {
-  server.handleClient();
-  if (strlen(GHOSTTRACE_WIFI_SSID) && WiFi.status() == WL_CONNECTED && !printedStationIp) {
-    Serial.print("Router/hotspot ESP address: http://");
-    Serial.println(WiFi.localIP());
-    printedStationIp = true;
-  }
-  if (WiFi.status() != WL_CONNECTED) printedStationIp = false;
+  pollBluetooth();
   // Bounded work and no delay(): receive reset commands even while flashing.
   for (int i = 0; i < 64 && Serial.available(); ++i) {
     const char c = static_cast<char>(Serial.read());
@@ -145,7 +151,7 @@ void loop() {
 
   const unsigned long now = millis();
   if (!receivedCommand || now - lastCommandAt > LINK_TIMEOUT_MS) {
-    // Lost app connection (Wi-Fi or USB): steady amber, silent.
+    // Lost app connection: steady amber, silent.
     rgb(true, true, false);
     buzzer(false);
   } else if (alertActive) {

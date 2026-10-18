@@ -120,5 +120,4 @@ footer .small-dot { width: 4px; height: 4px; }
 .alert-action { font-size: 11px; color: #d9c2c2; margin: 6px 0 10px; }
 .engine-actions { flex-wrap: wrap; padding-bottom: 4px; }
 .esp-config label { font-size: 11px; color: #9aaa9e; }
-.esp-config select, .esp-config input { display: block; margin-top: 6px; }
-.esp-config input { max-width: 240px; width: 100%; background: #101613; color: #dce7df; border: 1px solid #38453c; padding: 8px; border-radius: 5px; font-size: 11px; }
+.esp-config select { display: block; margin-top: 6px; }
