@@ -18,6 +18,8 @@ export interface LiveVisionOptions extends VisionOptions {
   onMarkers?: (markers: DetectedMarker[], frame: MarkerFrame) => void;
   /** Jaw ends of the current tong pose, null unless tracked or held (debug overlay). */
   onJawPoints?: (points: Point[] | null) => void;
+  /** Rig experiment: overrides the tracker's HAND_CONTACT_DWELL_MS. Tool contacts are unaffected. */
+  handContactDwellMs?: number;
 }
 
 /** Call with a playing, unmirrored camera video. Coordinates remain in the raw frame. */
@@ -36,7 +38,8 @@ export async function startVision(options: LiveVisionOptions): Promise<VisionHan
   catch { model = await create("CPU"); }
 
   let models: UtensilModels = options.utensilModels ?? {};
-  const tracker = createTracker(options.zones, options.onEvent, options.tuning, models);
+  const tracker = createTracker(options.zones, options.onEvent,
+    { ...options.tuning, ...(options.handContactDwellMs !== undefined && { handContactDwellMs: options.handContactDwellMs }) }, models);
   const markerDetector = createVideoMarkerDetector();
   let markerErrorLogged = false;
   let stopped = false;
