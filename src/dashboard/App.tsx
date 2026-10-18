@@ -10,6 +10,7 @@ import { DEMO_SCRIPT, MOVING_TONGS_SCRIPT } from "../sim/fixtures";
 import { chime } from "./chime";
 import { AlertPanel } from "./components/AlertPanel";
 import { CameraView } from "./components/CameraView";
+import { CameraSource } from "./components/CameraSource";
 import { EventLog } from "./components/EventLog";
 import { EspConnectionPanel } from "./components/EspConnectionPanel";
 import { SurfaceCards } from "./components/SurfaceCards";
@@ -99,14 +100,12 @@ export function App() {
             {vision.phase === "off"
               ? <button className="button primary" onClick={() => vision.start(deviceId || undefined)}>Start camera</button>
               : <button className="button" onClick={() => vision.stop()}>Stop camera</button>}
-            {vision.cameras.length > 1 && (
-              <select aria-label="Camera source" value={deviceId} onChange={event => {
-                setDeviceId(event.target.value);
-                if (vision.phase !== "off") vision.start(event.target.value || undefined);
-              }}>
-                <option value="">Default camera</option>
-                {vision.cameras.map((camera, i) => <option key={camera.deviceId} value={camera.deviceId}>{camera.label || `Camera ${i + 1}`}</option>)}
-              </select>
+            {vision.cameras.length > 0 && (
+              <CameraSource cameras={vision.cameras} requestedId={deviceId} activeId={vision.activeCameraId}
+                onChange={id => {
+                  setDeviceId(id);
+                  if (vision.phase !== "off") vision.start(id || undefined);
+                }} />
             )}
             <label className="check"><input type="checkbox" checked={mirrored} onChange={event => setMirrored(event.target.checked)} /> Mirror</label>
             <a className="link" href="./">Calibrate zones and tongs ↗</a>

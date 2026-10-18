@@ -8,6 +8,7 @@ import type { Point, UtensilModels, ZoneLayout } from "../shared/config";
 import type { ContactEvent, UtensilWashedEvent, VisionStatus, WashEvent } from "../shared/events";
 import type { VisionHandle } from "../shared/vision-types";
 import { startVision } from "../vision";
+import { openStableCamera } from "../vision/camera";
 import { parseZoneLayout } from "../vision/geometry";
 import { parseUtensilModels } from "../vision/pose";
 
@@ -32,6 +33,7 @@ export interface LiveVision {
   zones: ZoneLayout;
   utensilModels: UtensilModels;
   cameras: MediaDeviceInfo[];
+  activeCameraId: string;
   start(deviceId?: string): void;
   stop(): void;
 }
@@ -63,6 +65,7 @@ export function useLiveVision(onEvent: (event: ContactEvent | WashEvent | Utensi
   const [zones, setZones] = useState(loadZones);
   const [utensilModels, setUtensilModels] = useState(loadModels);
   const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
+  const [activeCameraId, setActiveCameraId] = useState("");
 
   const onEventRef = useRef(onEvent);
   onEventRef.current = onEvent;
@@ -98,18 +101,27 @@ export function useLiveVision(onEvent: (event: ContactEvent | WashEvent | Utensi
           throw new Error("Camera access requires localhost or HTTPS. Open the app using the Vite URL.");
         }
         // 1280×720 at native resolution: tong markers must stay ≥ 30 px per side (§4.4).
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 },
-            ...(deviceId ? { deviceId: { exact: deviceId } } : { facingMode: "environment" }) },
-        });
+        const stream = await openStableCamera(navigator.mediaDevices, deviceId,
+          () => attempt === generation.current);
         if (attempt !== generation.current) { stream.getTracks().forEach(track => track.stop()); return; }
         session.current.stream = stream;
+        const track = stream.getVideoTracks()[0];
+        const actualId = track?.getSettings().deviceId ?? deviceId ?? "";
+        const cameraName = track?.label || "Camera name unavailable";
+        setActiveCameraId(actualId);
+        // Populate the lens picker before model loading, so its default option
+        // cannot hide the camera Safari actually opened.
+        try {
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          if (attempt !== generation.current) return;
+          setCameras(devices.filter(d => d.kind === "videoinput"));
+        } catch { /* The track label below still identifies the active stream. */ }
+        if (attempt !== generation.current) return;
         video.srcObject = stream;
         await video.play();
         if (attempt !== generation.current) return;
         setSize({ width: video.videoWidth, height: video.videoHeight });
-        setMessage({ text: "Camera connected. Loading the hand-tracking model — the first start may take a moment…", error: false });
+        setMessage({ text: `${cameraName} connected. Loading the hand-tracking model — the first start may take a moment…`, error: false });
         let fingertips: Point[] = [];
         let jawPoints: Point[] | null = null;
         const handle = await startVision({
@@ -131,14 +143,10 @@ export function useLiveVision(onEvent: (event: ContactEvent | WashEvent | Utensi
         if (attempt !== generation.current) { handle.stop(); return; }
         session.current.vision = handle;
         setPhase("live");
-        setMessage({ text: "Tracking live.", error: false });
+        setMessage({ text: `Tracking live — ${cameraName}.`, error: false });
         stream.getVideoTracks()[0]?.addEventListener("ended", () => {
           if (attempt === generation.current) stop("Camera disconnected. Reconnect it and start again.", true);
         });
-        try {
-          const devices = await navigator.mediaDevices.enumerateDevices();
-          if (attempt === generation.current) setCameras(devices.filter(d => d.kind === "videoinput"));
-        } catch { /* Camera discovery is optional once the stream is running. */ }
       } catch (error) {
         if (attempt === generation.current) stop(explain(error), true);
       }
@@ -170,5 +178,5 @@ export function useLiveVision(onEvent: (event: ContactEvent | WashEvent | Utensi
     return () => { window.removeEventListener("pagehide", onHide); stop(); };
   }, [stop]);
 
-  return { videoRef, phase, message, frame, size, zones, utensilModels, cameras, start, stop };
+  return { videoRef, phase, message, frame, size, zones, utensilModels, cameras, activeCameraId, start, stop };
 }

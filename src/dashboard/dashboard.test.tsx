@@ -8,6 +8,7 @@ import { DEMO_SCRIPT, MOVING_TONGS_SCRIPT, SCENARIOS, alertId } from "../sim/fix
 import type { Scenario } from "../sim/fixtures";
 import { App } from "./App";
 import { AlertPanel } from "./components/AlertPanel";
+import { CameraSource } from "./components/CameraSource";
 import { SurfaceCards } from "./components/SurfaceCards";
 import { VisionStrip } from "./components/VisionStrip";
 import * as labels from "./labels";
@@ -85,6 +86,19 @@ describe("dashboard wording (spec §3.3)", () => {
 });
 
 describe("dashboard rendering", () => {
+  it("shows the actual automatic rear-camera selection instead of the default placeholder", () => {
+    const cameras = [
+      { deviceId: "main", label: "Back Wide Camera" },
+      { deviceId: "ultra", label: "Back Ultra Wide Camera" },
+    ] as MediaDeviceInfo[];
+    const automatic = renderToStaticMarkup(<CameraSource cameras={cameras} requestedId="" activeId="main" onChange={() => {}} />);
+    expect(automatic).toContain('<option value="main" selected="">Back Wide Camera</option>');
+    expect(automatic).not.toContain("Default camera");
+    expect(automatic).toContain("Back Ultra Wide Camera");
+    const manual = renderToStaticMarkup(<CameraSource cameras={cameras} requestedId="ultra" activeId="main" onChange={() => {}} />);
+    expect(manual).toContain('<option value="ultra" selected="">Back Ultra Wide Camera</option>');
+  });
+
   it("explains the Act 1 alert with the wash in the chain", () => {
     const state = run(DEMO_SCRIPT);
     const steps = state.alerts[0]!.chain.map(labels.chainStepText);
