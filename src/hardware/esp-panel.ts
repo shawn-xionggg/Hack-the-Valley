@@ -3,16 +3,16 @@ import { EspAlerts } from "./esp-alerts";
 import type { EspConnectionStatus, EspSerial } from "./esp-alerts";
 import { EspBluetoothAlerts } from "./esp-bluetooth";
 import type { EspBluetooth } from "./esp-bluetooth";
-import { acknowledgeHardwareAlerts } from "./acknowledge-alerts";
 
-export function mountEspPanel(container: HTMLElement, engine: Engine): void {
+export function mountEspPanel(container: HTMLElement, engine: Engine, onReset: () => void): () => void {
+  let disposed = false;
   container.innerHTML = `
     <div class="zone-actions engine-actions esp-config">
       <label>ESP connection <select data-esp-mode><option value="bluetooth">Bluetooth</option><option value="usb">USB serial</option></select></label>
     </div>
     <div class="zone-actions engine-actions">
-      <button class="text-button" data-esp-connect>Connect ESP</button>
-      <button class="text-button" data-esp-disconnect disabled>Disconnect ESP</button>
+      <button class="text-button button" data-esp-connect>Connect ESP</button>
+      <button class="text-button button" data-esp-disconnect disabled>Disconnect ESP</button>
     </div>
     <p class="hint" data-esp-status role="status" aria-live="polite"></p>`;
   const connect = container.querySelector<HTMLButtonElement>("[data-esp-connect]")!;
@@ -21,6 +21,7 @@ export function mountEspPanel(container: HTMLElement, engine: Engine): void {
   const mode = container.querySelector<HTMLSelectElement>("[data-esp-mode]")!;
   const statuses = new Map<string, EspConnectionStatus>();
   function report(transport: string, next: EspConnectionStatus): void {
+    if (disposed) return;
     statuses.set(transport, next);
     if (mode.value !== transport) return;
     const { phase, message } = next;
@@ -33,12 +34,12 @@ export function mountEspPanel(container: HTMLElement, engine: Engine): void {
   const usb = new EspAlerts(serial, next => report("usb", next));
   const bluetoothApi = (navigator as Navigator & { bluetooth?: EspBluetooth }).bluetooth;
   const bluetooth = new EspBluetoothAlerts(bluetoothApi, next => report("bluetooth", next),
-    () => acknowledgeHardwareAlerts(engine));
+    onReset);
   const update = (state: ReturnType<Engine["getState"]>) => {
     usb.update(state); bluetooth.update(state);
   };
   update(engine.getState());
-  engine.subscribe(update);
+  const unsubscribe = engine.subscribe(update);
   mode.addEventListener("change", () => {
     report(mode.value, statuses.get(mode.value)!);
   });
@@ -49,4 +50,12 @@ export function mountEspPanel(container: HTMLElement, engine: Engine): void {
   disconnect.addEventListener("click", () => {
     void (mode.value === "bluetooth" ? bluetooth.disconnect() : usb.disconnect());
   });
+  return () => {
+    if (disposed) return;
+    disposed = true;
+    unsubscribe();
+    bluetooth.dispose();
+    usb.dispose();
+    container.replaceChildren();
+  };
 }

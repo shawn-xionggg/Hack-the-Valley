@@ -110,7 +110,7 @@ export function mountEnginePanel(container: HTMLElement): EnginePanel {
     <p class="hint" id="engine-last">No events yet. Exposure is inferred from camera geometry; it is not an allergen test.</p>
     <div id="esp-panel" aria-label="ESP hardware alerts"></div>`;
   const el = (id: string) => container.querySelector<HTMLElement>(`#${id}`)!;
-  mountEspPanel(el("esp-panel"), engine);
+  mountEspPanel(el("esp-panel"), engine, resetSession);
 
   function card(state: EngineState, id: ExposableSurfaceId): HTMLElement {
     const { status } = state.surfaces[id];
@@ -221,11 +221,12 @@ export function mountEnginePanel(container: HTMLElement): EnginePanel {
     dispatch({ ...stamp(), kind: "wash", method: "manual-tap", source: "manual", verified: false }));
   el("replaced").addEventListener("click", () =>
     dispatch({ ...stamp(), kind: "utensil-replaced-confirmed", utensilId: "tongs", source: "manual" }));
-  el("reset").addEventListener("click", () => {
+  function resetSession() {
     stopReplay();
     simulated = false;
     dispatch({ ...stamp(), kind: "session-reset", source: "manual" });
-  });
+  }
+  el("reset").addEventListener("click", resetSession);
   el("sim-act1").addEventListener("click", () => simulate(DEMO_SCRIPT.events));
   el("sim-act2").addEventListener("click", () => simulate(MOVING_TONGS_SCRIPT.events));
   render(engine.getState());

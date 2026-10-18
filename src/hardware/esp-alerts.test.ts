@@ -159,4 +159,35 @@ describe("ESP output uses the existing engine verdict", () => {
     bridge.update(createEngine().getState());
     expect(statuses.at(-1)?.phase).toBe("unsupported");
   });
+
+  it("releases USB and stops heartbeats when the dashboard panel is removed", async () => {
+    vi.useFakeTimers();
+    const { bridge, port, serial } = rig();
+    await bridge.connect();
+    await settle();
+    const count = port.lines.length;
+    bridge.dispose();
+    await settle();
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(port.writable.locked).toBe(false);
+    expect(port.close).toHaveBeenCalledOnce();
+    expect(port.lines).toHaveLength(count);
+    expect(vi.getTimerCount()).toBe(0);
+    await bridge.connect();
+    expect(serial.requestPort).toHaveBeenCalledOnce();
+  });
+
+  it("closes a USB port that finishes opening after the panel was removed", async () => {
+    const { bridge, port } = rig();
+    let opened!: () => void;
+    port.open.mockImplementationOnce(() => new Promise(resolve => { opened = resolve; }));
+    const connecting = bridge.connect();
+    await settle();
+    bridge.dispose();
+    opened();
+    await connecting;
+    expect(port.close).toHaveBeenCalledOnce();
+    expect(port.writable.locked).toBe(false);
+    expect(port.lines).toEqual([]);
+  });
 });

@@ -1,5 +1,5 @@
-// Live video with the zone overlay. Coordinates stay in the raw frame (§4.4): mirroring is CSS only, and the
-// polygons sit inside the same mirrored container. Text labels sit outside it so they don't read backwards.
+// Live video and overlay share a CSS vertical flip and optional horizontal mirror.
+// Coordinates stay in the raw frame (§4.4). Labels sit outside the transformed feed so they stay readable.
 
 import type { Point, Polygon, ZonedObjectId } from "../../shared/config";
 import type { EngineState } from "../../shared/engine-types";
@@ -58,7 +58,7 @@ export function CameraView({ vision, surfaces, mirrored, paused }: Props) {
       <div className="zone-labels" aria-hidden="true">
         {shown.map(id => {
           const [x, y] = centroid(polygon(id));
-          return <span key={id} style={{ left: `${(mirrored ? 1 - x : x) * 100}%`, top: `${y * 100}%` }}>{ZONE_NAMES[id]}</span>;
+          return <span key={id} style={{ left: `${(mirrored ? 1 - x : x) * 100}%`, top: `${(1 - y) * 100}%` }}>{ZONE_NAMES[id]}</span>;
         })}
       </div>
       {phase !== "live" && (

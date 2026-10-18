@@ -1,15 +1,17 @@
 // GhostTrace dashboard (Person 3): renders EngineState and VisionStatus, and sends the manual events
 // (wash, tongs replaced, acknowledge, reset) through engine.dispatch. Spec §3.3 wording lives in labels.ts.
 
-import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { createEngine } from "../engine";
 import { ORDERS } from "../shared/config";
+import type { LoggedEvent } from "../shared/engine-types";
 import type { ContactEvent, GhostEvent, UtensilWashedEvent, WashEvent } from "../shared/events";
 import { DEMO_SCRIPT, MOVING_TONGS_SCRIPT } from "../sim/fixtures";
 import { chime } from "./chime";
 import { AlertPanel } from "./components/AlertPanel";
 import { CameraView } from "./components/CameraView";
 import { EventLog } from "./components/EventLog";
+import { EspConnectionPanel } from "./components/EspConnectionPanel";
 import { SurfaceCards } from "./components/SurfaceCards";
 import { VisionStrip } from "./components/VisionStrip";
 import { MANUAL_WASH_BUTTON, MANUAL_WASH_NOTE, SCOPE_NOTE } from "./labels";
@@ -28,6 +30,8 @@ export function App() {
   const [simulated, setSimulated] = useState(false);
   const [mirrored, setMirrored] = useState(false);
   const [deviceId, setDeviceId] = useState("");
+  const [archivedLog, setArchivedLog] = useState<LoggedEvent[]>([]);
+  const eventLog = useMemo(() => [...archivedLog, ...state.log], [archivedLog, state.log]);
 
   const dispatch = (event: GhostEvent) => engine.dispatch(event);
   const vision = useLiveVision((event: ContactEvent | WashEvent | UtensilWashedEvent) => { if (!simulated) dispatch(event); });
@@ -47,12 +51,23 @@ export function App() {
     if (fresh.some(alert => !alert.acknowledged)) chime();
   }, [state]);
 
-  const simulate = (script: GhostEvent[]) => { setSimulated(true); simulator.play(script); };
-  const reset = () => {
-    simulator.cancel();
-    setSimulated(false);
-    dispatch({ ...stamp(), kind: "session-reset", source: "manual" });
+  // Preserve displayed history across resets without replaying old events into
+  // the fresh engine session or changing its duplicate-id/exposure rules.
+  const archiveCurrentLog = useCallback(() => {
+    const currentLog = engine.getState().log;
+    if (currentLog.length) setArchivedLog(previous => [...previous, ...currentLog]);
+  }, [engine]);
+  const simulate = (script: GhostEvent[]) => {
+    archiveCurrentLog();
+    setSimulated(true);
+    simulator.play(script);
   };
+  const reset = useCallback(() => {
+    simulator.cancel();
+    archiveCurrentLog();
+    setSimulated(false);
+    engine.dispatch({ ...stamp(), kind: "session-reset", source: "manual" });
+  }, [engine, simulator, archiveCurrentLog]);
   const order = ORDERS[0];
   const hasAlert = state.alerts.some(alert => !alert.acknowledged);
 
@@ -110,6 +125,8 @@ export function App() {
           <p className="scope-note">{SCOPE_NOTE}</p>
         </section>
 
+        <EspConnectionPanel engine={engine} onReset={reset} />
+
         {/* Operator-only controls stay out of the way: the worker's own action (replacing tongs) is under the cards. */}
         <details className="panel controls-panel">
           <summary><h2>Operator controls</h2></summary>
@@ -132,8 +149,8 @@ export function App() {
         </details>
 
         <details className="panel log-panel">
-          <summary><h2>Event log <span className="count">{state.log.length}</span></h2></summary>
-          <EventLog log={state.log} />
+          <summary><h2>Event log <span className="count">{eventLog.length}</span></h2></summary>
+          <EventLog log={eventLog} />
         </details>
       </main>
     </div>

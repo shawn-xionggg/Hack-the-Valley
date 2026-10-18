@@ -32,6 +32,7 @@ export class EspAlerts {
   private sending = false;
   private dirty = false;
   private phase: Phase;
+  private disposed = false;
   private readonly encoder = new TextEncoder();
   private readonly onUnplug = (event: Event) => {
     if (event.target === this.port || (event as Event & { port?: EspSerialPort }).port === this.port) {
@@ -54,13 +55,20 @@ export class EspAlerts {
 
   /** Call directly from a click: requestPort requires a browser user gesture. */
   async connect(): Promise<void> {
-    if (!this.serial || ["connecting", "connected", "disconnecting"].includes(this.phase)) return;
+    if (this.disposed || !this.serial || ["connecting", "connected", "disconnecting"].includes(this.phase)) return;
     this.report("connecting", "Select the ESP USB serial port...");
     let opened = false;
     try {
-      this.port = await this.serial.requestPort();
-      await this.port.open({ baudRate: 115200 });
+      const port = await this.serial.requestPort();
+      if (this.disposed) return;
+      this.port = port;
+      await port.open({ baudRate: 115200 });
       opened = true;
+      if (this.disposed) {
+        await port.close().catch(() => {});
+        this.port = undefined;
+        return;
+      }
       if (!this.port.writable) throw new Error("Serial port is not writable.");
       this.writer = this.port.writable.getWriter();
       this.port.addEventListener("disconnect", this.onUnplug);
@@ -73,7 +81,7 @@ export class EspAlerts {
       if (opened) await this.port?.close().catch(() => {});
       this.port = undefined;
       const cancelled = error instanceof DOMException && error.name === "NotFoundError";
-      this.report(cancelled ? "disconnected" : "error", cancelled ? "ESP connection cancelled" :
+      if (!this.disposed) this.report(cancelled ? "disconnected" : "error", cancelled ? "ESP connection cancelled" :
         `ESP connection failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -118,5 +126,11 @@ export class EspAlerts {
   private report(phase: Phase, message: string): void {
     this.phase = phase;
     this.onStatus({ phase, message });
+  }
+
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    void this.disconnect(false);
   }
 }

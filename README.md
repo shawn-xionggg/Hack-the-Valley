@@ -76,8 +76,10 @@ Connect an ESP32 with an RGB LED and active buzzer over **Bluetooth** using **Co
 under Exposure tracking. Keep your laptop's normal Wi-Fi connection. Upload the firmware
 once over USB, then power the board from a power bank or USB supply. USB serial is
 also available as a fallback. Unacknowledged alerts on `action-required` meals drive
-red flashes and beeping. Acknowledgement turns the LED and buzzer completely off while
-the meal stays on hold; session reset clears its tracked risk. See
+red flashes and beeping. Acknowledgement changes the LED to steady red and silences the buzzer while
+the meal stays on hold. The physical GPIO 32 button performs the same full session
+reset as the website's Reset session button, clearing tracked risk and returning
+the output to blue and silent. See
 [hardware setup, firmware and demo steps](hardware/README.md).
 
 ## Check

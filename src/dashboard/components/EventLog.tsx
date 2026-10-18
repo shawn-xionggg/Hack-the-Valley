@@ -3,7 +3,7 @@ import { EFFECT_LABELS, clockTime, eventText } from "../labels";
 
 const SHOWN = 40;
 
-/** The engine's event log, newest first: every event and what it did, including ignored ones. */
+/** Event history across sessions, newest first, including reset and ignored events. */
 export function EventLog({ log }: { log: LoggedEvent[] }) {
   if (!log.length) return <p className="empty-note">No events yet this session.</p>;
   return (
