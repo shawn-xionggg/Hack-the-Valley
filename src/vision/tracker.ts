@@ -53,7 +53,7 @@ export function lowEnoughToTouch(pose: UtensilPose, b: ToolContactTarget, sideMa
  * passing over a zone doesn't count. Tool contacts keep `contactDwellMs` (400 ms) and A4's height gate. Spec §4.4
  * still says 400 ms for every contact, so this needs an amendment before it can merge.
  */
-export const HAND_CONTACT_DWELL_MS = 800;
+export const HAND_CONTACT_DWELL_MS = 700;
 
 /** Converts normalized landmarks and marker detections into the shared vision events; no exposure state lives here. */
 export function createTracker(
