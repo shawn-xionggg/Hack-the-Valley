@@ -5,6 +5,7 @@ import type { ContactEvent, UtensilWashedEvent, VisionStatus, WashEvent } from "
 import type { VisionHandle } from "./shared/vision-types";
 import type { HandLandmarkerResult } from "@mediapipe/tasks-vision";
 import { startVision } from "./vision";
+import { openStableCamera } from "./vision/camera";
 import { mountEnginePanel } from "./engine-panel";
 import { overlappingZones, parseZoneLayout, polygonsOverlap, validatePolygon } from "./vision/geometry";
 import { HAND_CONTACT_DWELL_MS, fixedUtensilStatus } from "./vision/tracker";
@@ -415,11 +416,8 @@ async function startCamera() {
   message("Requesting camera access…");
   try {
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) throw new Error("Camera access requires localhost or HTTPS. Open the app using the Vite URL.");
-    const nextStream = await navigator.mediaDevices.getUserMedia({
-      audio: false,
-      video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 },
-        ...(camera.value ? { deviceId: { exact: camera.value } } : { facingMode: "environment" }) },
-    });
+    const nextStream = await openStableCamera(navigator.mediaDevices, camera.value || undefined,
+      () => attempt === generation);
     if (attempt !== generation) { nextStream.getTracks().forEach(track => track.stop()); return; }
     stream = nextStream;
     video.srcObject = stream;

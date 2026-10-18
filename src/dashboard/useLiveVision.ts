@@ -8,6 +8,7 @@ import type { Point, UtensilModels, ZoneLayout } from "../shared/config";
 import type { ContactEvent, UtensilWashedEvent, VisionStatus, WashEvent } from "../shared/events";
 import type { VisionHandle } from "../shared/vision-types";
 import { startVision } from "../vision";
+import { openStableCamera } from "../vision/camera";
 import { parseZoneLayout } from "../vision/geometry";
 import { parseUtensilModels } from "../vision/pose";
 
@@ -98,11 +99,8 @@ export function useLiveVision(onEvent: (event: ContactEvent | WashEvent | Utensi
           throw new Error("Camera access requires localhost or HTTPS. Open the app using the Vite URL.");
         }
         // 1280×720 at native resolution: tong markers must stay ≥ 30 px per side (§4.4).
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 },
-            ...(deviceId ? { deviceId: { exact: deviceId } } : { facingMode: "environment" }) },
-        });
+        const stream = await openStableCamera(navigator.mediaDevices, deviceId,
+          () => attempt === generation.current);
         if (attempt !== generation.current) { stream.getTracks().forEach(track => track.stop()); return; }
         session.current.stream = stream;
         video.srcObject = stream;
