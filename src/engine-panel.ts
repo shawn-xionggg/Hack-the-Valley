@@ -8,6 +8,7 @@ import type { ExposableSurfaceId, ToolSurface } from "./shared/config";
 import type { Alert, ChainStep, EngineState, LoggedEvent, SurfaceStatus } from "./shared/engine-types";
 import type { ContactEvent, GhostEvent, UtensilTracking, UtensilWashedEvent, WashEvent, WashMethod } from "./shared/events";
 import { DEMO_SCRIPT, MOVING_TONGS_SCRIPT } from "./sim/fixtures";
+import { mountEspPanel } from "./hardware/esp-panel";
 
 const CARDS: ExposableSurfaceId[] = ["hands", "peanut-source", "tongs-tip", "tongs-handle", "meal-1"];
 const LABELS: Record<ExposableSurfaceId, string> = {
@@ -106,8 +107,10 @@ export function mountEnginePanel(container: HTMLElement): EnginePanel {
       <button class="text-button" id="sim-act1">Replay Act 1 (simulated)</button>
       <button class="text-button" id="sim-act2">Replay Act 2 (simulated)</button>
     </div>
-    <p class="hint" id="engine-last">No events yet. Exposure is inferred from camera geometry; it is not an allergen test.</p>`;
+    <p class="hint" id="engine-last">No events yet. Exposure is inferred from camera geometry; it is not an allergen test.</p>
+    <div id="esp-panel" aria-label="ESP hardware alerts"></div>`;
   const el = (id: string) => container.querySelector<HTMLElement>(`#${id}`)!;
+  mountEspPanel(el("esp-panel"), engine);
 
   function card(state: EngineState, id: ExposableSurfaceId): HTMLElement {
     const { status } = state.surfaces[id];
