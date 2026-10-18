@@ -1,32 +1,42 @@
 import "./style.css";
 import { SURFACES, UTENSIL_MODELS_STORAGE_KEY, ZONE_LAYOUT_STORAGE_KEY } from "./shared/config";
-import type { Point, Polygon, ToolContactTarget, ToolSurface, UtensilModels, ZoneLayout, ZonedObjectId } from "./shared/config";
+import type { Point, Polygon, ToolContactTarget, UtensilModels, ZonedObjectId } from "./shared/config";
 import type { ContactEvent, UtensilWashedEvent, VisionStatus, WashEvent } from "./shared/events";
 import type { VisionHandle } from "./shared/vision-types";
 import type { HandLandmarkerResult } from "@mediapipe/tasks-vision";
 import { startVision } from "./vision";
 import { openStableCamera } from "./vision/camera";
 import { mountEnginePanel } from "./engine-panel";
-import { overlappingZones, parseZoneLayout, polygonsOverlap, validatePolygon } from "./vision/geometry";
+import { overlappingZones, parseZoneLayout } from "./vision/geometry";
 import { HAND_CONTACT_DWELL_MS, fixedUtensilStatus } from "./vision/tracker";
-import { calibrateMarker, parseUtensilModels, poseFromMarkers } from "./vision/pose";
+import { parseUtensilModels } from "./vision/pose";
 import { addTouchFrame, createTouchCapture } from "./vision/touch";
 import type { TouchCapture } from "./vision/touch";
 import {
-  GO_NO_GO_RATE, MIN_MARKER_SIDE_PX, TONG_MARKER_IDS, createMarkerSvg, createMarkerTrial, createTongMarkerSheet,
-  drawMarkerBoxes, markerSidePx, recordMarkerFrame,
+  GO_NO_GO_RATE, TONG_MARKER_IDS, createMarkerSvg, createMarkerTrial, createTongMarkerSheet, drawMarkerBoxes, recordMarkerFrame,
 } from "./vision/aruco";
+import {
+  CALIBRATION_CANCELLED, CALIBRATION_CLEARED, CALIBRATION_IDLE_HELP, CALIBRATION_STEPS, CALIBRATION_ZONE_IDS, CLOSE_RADIUS_PX,
+  DEMO_LAYOUT_HELP, DRAW_HELP, MIN_VERTEX_GAP_PX, STORAGE_UNAVAILABLE_TONGS, STORAGE_UNAVAILABLE_ZONES, TOUCH_CANCELLED,
+  ZONE_IDLE_HELP, calibratedFacesText, calibratedMessage, demoLayout, emptyZones, finishCalibrationStep as advanceCalibration,
+  finishZoneDraft, markerStatusText, startCalibrationError, touchCaptureFace, touchFailedMessage, touchRecordingMessage, touchRefsText,
+  touchSavedMessage, withMarkerEntry, withTouchSide,
+} from "./vision/calibration";
+import type { TongCalibration } from "./vision/calibration";
 import type { DetectedMarker, MarkerTrial } from "./vision/aruco";
 
-const zoneIds: ZonedObjectId[] = ["peanut-source", "tongs-tip", "tongs-handle", "meal-1", "wash-station"];
+const zoneIds = CALIBRATION_ZONE_IDS;
 const colors = ["#f8bd72", "#baabff", "#84b8ff", "#fc91ac", "#79ddc1"];
-const emptyZones = (): ZoneLayout => ({ "peanut-source": [], "tongs-tip": [], "tongs-handle": [], "meal-1": [], "wash-station": [] });
-let zones = emptyZones();
-try { zones = parseZoneLayout(JSON.parse(localStorage.getItem(ZONE_LAYOUT_STORAGE_KEY) ?? "null")) ?? zones; }
-catch { /* Storage can be unavailable; calibration still works for this session. */ }
-let utensilModels: UtensilModels = {};
-try { utensilModels = parseUtensilModels(JSON.parse(localStorage.getItem(UTENSIL_MODELS_STORAGE_KEY) ?? "null")); }
-catch { /* As above: without stored models the tongs start "fixed". */ }
+const loadZones = () => {
+  try { return parseZoneLayout(JSON.parse(localStorage.getItem(ZONE_LAYOUT_STORAGE_KEY) ?? "null")) ?? emptyZones(); }
+  catch { return emptyZones(); } // Storage can be unavailable; calibration still works for this session.
+};
+const loadModels = (): UtensilModels => {
+  try { return parseUtensilModels(JSON.parse(localStorage.getItem(UTENSIL_MODELS_STORAGE_KEY) ?? "null")); }
+  catch { return {}; } // As above: without stored models the tongs start "fixed".
+};
+let zones = loadZones();
+let utensilModels = loadModels();
 
 document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
   <header class="topbar">
@@ -113,29 +123,14 @@ let vision: VisionHandle | undefined;
 let generation = 0;
 let running = false;
 let selectedZone: ZonedObjectId | undefined;
-/**
- * Tong calibration for one face (§4.4): the marker's corners are frozen when it starts, then the
- * tip and handle are outlined and the jaw ends clicked, all on the raw frame.
- */
-type CalibrationStep = ToolSurface | "jaws";
-let calibration: { markerId: number; corners: Point[]; step: CalibrationStep; parts: Partial<Record<ToolSurface, Polygon>> } | undefined;
+/** Tong calibration for one face (§4.4), in progress. */
+let calibration: TongCalibration | undefined;
 /** A4 touch-reference capture in progress, fed from onMarkers. */
 let touchCapture: TouchCapture | undefined;
-const TOUCH_TARGETS: ToolContactTarget[] = ["meal-1", "peanut-source"];
-const TOUCH_LABELS: Record<ToolContactTarget, string> = { "meal-1": "plate", "peanut-source": "peanut" };
 /** Vertices placed so far for the selected zone or calibration step, in raw normalized coordinates. */
 let draft: Point[] = [];
 let cursor: Point | undefined;
-const CLOSE_RADIUS_PX = 12; // clicking this close to the first vertex closes the polygon
-const MIN_VERTEX_GAP_PX = 6; // clicks this close to the previous vertex are ignored (double-clicks)
-const DRAW_HELP = "Click to place corners. Click the first corner or press Enter to finish · Backspace undoes · Esc cancels.";
-const IDLE_HELP = "Zones are saved on this device. Recalibrate after moving the camera or switching cameras.";
-const CALIBRATION_IDLE_HELP = "Lay the tongs flat and closed with one marker face up, then calibrate that face. Repeat with the tongs flipped. Keep them still while you draw. Optional height gate: with each face up, rest the jaw ends on the plate and record, then in the peanuts. Recalibrating a face clears its touches.";
-const CALIBRATION_STEPS: Record<CalibrationStep, string> = {
-  "tongs-tip": `Outline the tong tips. Pad the outline past the jaws so open jaws stay inside. ${DRAW_HELP}`,
-  "tongs-handle": `Outline the handle, leaving a gap over the hinge. ${DRAW_HELP}`,
-  jaws: "Click the jaw end (one or two points), then press Enter · Backspace undoes · Esc cancels.",
-};
+const IDLE_HELP = ZONE_IDLE_HELP;
 const TRACKING_LABELS: Record<VisionStatus["utensils"]["tongs"]["tracking"], string> = {
   tracked: "Tracked",
   held: "Held (last pose)",
@@ -320,41 +315,18 @@ function onMarkers(next: DetectedMarker[], frame: { width: number; height: numbe
   markers = next;
   // Side length is what decides whether a tag is big enough (§4.4: ≥ 30 px).
   const aspect = frame.width / frame.height;
-  el("marker-status").textContent = next.length ? next.map(m => {
-    const side = Math.round(markerSidePx(m, frame.width, frame.height));
-    return `${m.id} · ${side} px${side < MIN_MARKER_SIDE_PX ? " ⚠" : ""}${touchRatios(m, aspect)}`;
-  }).join(", ") : "No markers visible";
+  el("marker-status").textContent = markerStatusText(next, frame, utensilModels);
   el("marker-frame").textContent = `${frame.width} × ${frame.height} · ${Math.round(frame.ms)} MS`;
   if (trial) { recordMarkerFrame(trial, next, frame); renderTrials(); }
   if (touchCapture) feedTouchCapture(next, aspect);
 }
 
-/** A4: the live side over each recorded touch reference. Above 1 + toolContactSideMargin, that target is gated. */
-function touchRatios(marker: DetectedMarker, aspect: number): string {
-  const entry = utensilModels.tongs?.markers.find(m => m.markerId === marker.id);
-  const side = entry && poseFromMarkers([marker], { markers: [entry] }, aspect)?.markerSide;
-  if (!entry?.touchSides || !side) return "";
-  return TOUCH_TARGETS.flatMap(target => {
-    const reference = entry.touchSides?.[target];
-    return reference ? [` · ×${(side / reference).toFixed(2)} ${TOUCH_LABELS[target]}`] : [];
-  }).join("");
-}
-
 function startTouchCapture(target: ToolContactTarget) {
-  const calibrated = utensilModels.tongs?.markers ?? [];
-  // The face that would place the tongs right now: the larger visible calibrated marker, as in poseFromMarkers.
-  const face = poseFromMarkers(markers, { markers: calibrated }, canvas.width / canvas.height || 1);
-  if (!running || !face) {
-    el("calibration-help").textContent = `No calibrated face is in view. Rest the jaw ends on the ${TOUCH_LABELS[target]} with a calibrated face up, then try again.`;
-    return;
-  }
-  if (validatePolygon(zones[target])) {
-    el("calibration-help").textContent = `Calibrate the ${SURFACES[target].label} zone first.`;
-    return;
-  }
+  const face = touchCaptureFace(running ? markers : [], utensilModels, zones, target, canvas.width / canvas.height || 1);
+  if ("error" in face) { el("calibration-help").textContent = face.error; return; }
   endCalibration();
   touchCapture = createTouchCapture(face.markerId, target, performance.now());
-  el("calibration-help").textContent = `Recording ID ${face.markerId} on the ${TOUCH_LABELS[target]}. Keep the jaw ends resting on it for a second…`;
+  el("calibration-help").textContent = touchRecordingMessage(face.markerId, target);
   renderCalibration();
 }
 
@@ -366,15 +338,13 @@ function feedTouchCapture(next: DetectedMarker[], aspect: number) {
   if (!result.done) return;
   touchCapture = undefined;
   if ("error" in result) {
-    el("calibration-help").textContent = `ID ${c.markerId} ${TOUCH_LABELS[c.target]} touch not saved: ${result.error}`;
+    el("calibration-help").textContent = touchFailedMessage(c.markerId, c.target, result.error);
     renderCalibration();
     return;
   }
-  const updated = { ...entry, touchSides: { ...entry.touchSides, [c.target]: result.side } };
-  utensilModels = { tongs: { markers: utensilModels.tongs!.markers.map(m => m.markerId === c.markerId ? updated : m) } };
+  utensilModels = withTouchSide(utensilModels, c.markerId, c.target, result.side);
   saveUtensilModels();
-  el("calibration-help").textContent = `ID ${c.markerId} ${TOUCH_LABELS[c.target]} touch saved. Tool contacts with it now need the tips down at this height`
-    + (c.target === "peanut-source" ? ", and so does a tong wash at the sink (same rim height)." : ".");
+  el("calibration-help").textContent = touchSavedMessage(c.markerId, c.target);
 }
 
 function stopCamera(text = "Camera stopped. Start it again whenever you’re ready.") {
@@ -477,7 +447,7 @@ async function startCamera() {
 function saveZones() {
   vision?.setZones(zones);
   try { localStorage.setItem(ZONE_LAYOUT_STORAGE_KEY, JSON.stringify(zones)); }
-  catch { el("zone-help").textContent = "Browser storage is unavailable. These zones will last for this session only."; }
+  catch { el("zone-help").textContent = STORAGE_UNAVAILABLE_ZONES; }
   const overlapping = new Set(overlappingZones(zones).flat());
   document.querySelectorAll<HTMLButtonElement>("[data-zone]").forEach(button => {
     const id = button.dataset.zone as ZonedObjectId;
@@ -508,36 +478,22 @@ function selectZone(next: ZonedObjectId | undefined) {
 function finishDraft() {
   if (calibration) { finishCalibrationStep(); return; }
   if (!selectedZone) return;
-  const error = validatePolygon(draft);
-  if (error) { el("zone-help").textContent = error; return; }
-  const id = selectedZone;
-  zones[id] = draft;
+  const result = finishZoneDraft(zones, selectedZone, draft);
+  if ("error" in result) { el("zone-help").textContent = result.error; return; }
+  zones = result.zones;
   selectZone(undefined);
-  const others = overlappingZones(zones).flatMap(([a, b]) => a === id ? [b] : b === id ? [a] : []);
-  el("zone-help").textContent = others.length ? overlapWarning(id, others)
-    : `${SURFACES[id].label} saved. Select another surface to outline it.`;
-}
-
-/** Saved anyway (the tracker can cope), but the person calibrating should know why it's risky. */
-function overlapWarning(id: ZonedObjectId, others: ZonedObjectId[]): string {
-  const isTongPair = (other: ZonedObjectId) => SURFACES[id].utensilId !== undefined && SURFACES[id].utensilId === SURFACES[other].utensilId;
-  const reasons = [
-    others.some(isTongPair) && "Leave a gap over the hinge so tip and handle touches can't be confused.",
-    others.some(other => !isTongPair(other)) && "A touch in the shared area counts for both zones.",
-  ].filter(Boolean).join(" ");
-  return `⚠ ${SURFACES[id].label} saved, but it overlaps ${others.map(other => SURFACES[other].label).join(", ")}. ${reasons}`;
+  el("zone-help").textContent = result.message;
 }
 
 function renderCalibration() {
   const calibrated = new Set(utensilModels.tongs?.markers.map(m => m.markerId));
-  el("calibrated-faces").textContent = TONG_MARKER_IDS.map(id => `${id} ${calibrated.has(id) ? "✓" : "—"}`).join(" · ");
+  el("calibrated-faces").textContent = calibratedFacesText(utensilModels);
   document.querySelectorAll<HTMLButtonElement>("[data-calibrate]").forEach(button => {
     button.disabled = !running;
     button.setAttribute("aria-pressed", String(calibration?.markerId === Number(button.dataset.calibrate)));
   });
   el<HTMLButtonElement>("clear-calibration").disabled = !calibrated.size;
-  el("touch-refs").textContent = utensilModels.tongs?.markers.map(m =>
-    `${m.markerId} ${TOUCH_TARGETS.map(target => `${TOUCH_LABELS[target]} ${m.touchSides?.[target] ? "✓" : "—"}`).join(" ")}`).join(" · ") || "None";
+  el("touch-refs").textContent = touchRefsText(utensilModels);
   document.querySelectorAll<HTMLButtonElement>("[data-touch]").forEach(button => {
     button.disabled = !running || !calibrated.size;
     button.setAttribute("aria-pressed", String(touchCapture?.target === button.dataset.touch));
@@ -549,7 +505,7 @@ function startCalibration(markerId: number) {
   // Freeze the tag as it is now: the outlines are measured against this one pose.
   const marker = markers.find(m => m.id === markerId);
   if (!running || !marker) {
-    el("calibration-help").textContent = `ID ${markerId} isn't in view. Lay the tongs flat and closed with ID ${markerId} face up, then try again.`;
+    el("calibration-help").textContent = startCalibrationError(markerId);
     return;
   }
   selectZone(undefined);
@@ -572,28 +528,19 @@ function endCalibration(text?: string) {
 }
 
 function finishCalibrationStep() {
-  const c = calibration!;
-  if (c.step !== "jaws") {
-    const error = validatePolygon(draft);
-    if (error) { el("calibration-help").textContent = error; return; }
-    c.parts[c.step] = draft;
+  const result = advanceCalibration(calibration!, draft);
+  if (result.kind === "error") { el("calibration-help").textContent = result.message; return; }
+  if (result.kind === "failed") { endCalibration(result.message); return; }
+  if (result.kind === "next") {
+    calibration = result.calibration;
     draft = [];
-    c.step = c.step === "tongs-tip" ? "tongs-handle" : "jaws";
-    const tip = c.parts["tongs-tip"], handle = c.parts["tongs-handle"];
-    const hinge = tip && handle && polygonsOverlap(tip, handle) ? "⚠ Tip and handle overlap: a gap over the hinge keeps their touches apart. " : "";
-    el("calibration-help").textContent = `ID ${c.markerId}: ${hinge}${CALIBRATION_STEPS[c.step]}`;
+    el("calibration-help").textContent = result.message;
     draw();
     return;
   }
-  const tip = c.parts["tongs-tip"], handle = c.parts["tongs-handle"];
-  if (!draft.length) { el("calibration-help").textContent = `ID ${c.markerId}: click at least one jaw end first.`; return; }
-  if (!tip || !handle) return;
-  const entry = calibrateMarker(c.markerId, c.corners, { "tongs-tip": tip, "tongs-handle": handle }, draft);
-  if (!entry) { endCalibration(`ID ${c.markerId}: the marker outline was too distorted to calibrate. Lay the tongs flat and try again.`); return; }
-  utensilModels = { tongs: { markers: [...(utensilModels.tongs?.markers ?? []).filter(m => m.markerId !== c.markerId), entry] } };
+  utensilModels = withMarkerEntry(utensilModels, result.entry);
   saveUtensilModels();
-  const missing = TONG_MARKER_IDS.filter(id => !utensilModels.tongs?.markers.some(m => m.markerId === id));
-  endCalibration(`ID ${c.markerId} calibrated.${missing.length ? ` Flip the tongs and calibrate ID ${missing.join(", ")}.` : " Both faces are calibrated."}`);
+  endCalibration(calibratedMessage(utensilModels, result.entry.markerId));
 }
 
 function saveUtensilModels() {
@@ -601,7 +548,7 @@ function saveUtensilModels() {
   try {
     if (utensilModels.tongs) localStorage.setItem(UTENSIL_MODELS_STORAGE_KEY, JSON.stringify(utensilModels));
     else localStorage.removeItem(UTENSIL_MODELS_STORAGE_KEY);
-  } catch { el("calibration-help").textContent = "Browser storage is unavailable. This calibration will last for this session only."; }
+  } catch { el("calibration-help").textContent = STORAGE_UNAVAILABLE_TONGS; }
   renderCalibration();
 }
 
@@ -627,7 +574,7 @@ window.addEventListener("keydown", event => {
   if ((!selectedZone && !calibration) || event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) return;
   if (event.key === "Enter") finishDraft();
   else if (event.key === "Backspace" && draft.length) draft.pop();
-  else if (event.key === "Escape") { if (calibration) endCalibration("Calibration cancelled. Nothing was saved."); else selectZone(undefined); }
+  else if (event.key === "Escape") { if (calibration) endCalibration(CALIBRATION_CANCELLED); else selectZone(undefined); }
   else return;
   event.preventDefault(); // stops Enter from also "clicking" the focused zone button
   draw();
@@ -638,7 +585,7 @@ document.querySelectorAll<HTMLButtonElement>("[data-zone]").forEach(button => bu
 document.querySelectorAll<HTMLButtonElement>("[data-calibrate]").forEach(button => button.addEventListener("click", () => {
   const id = Number(button.dataset.calibrate);
   touchCapture = undefined;
-  if (calibration?.markerId === id) endCalibration("Calibration cancelled. Nothing was saved.");
+  if (calibration?.markerId === id) endCalibration(CALIBRATION_CANCELLED);
   else { endCalibration(); startCalibration(id); }
 }));
 document.querySelectorAll<HTMLButtonElement>("[data-touch]").forEach(button => button.addEventListener("click", () => {
@@ -646,7 +593,7 @@ document.querySelectorAll<HTMLButtonElement>("[data-touch]").forEach(button => b
   if (touchCapture?.target === target) {
     touchCapture = undefined;
     renderCalibration();
-    el("calibration-help").textContent = "Touch recording cancelled. Nothing was saved.";
+    el("calibration-help").textContent = TOUCH_CANCELLED;
   } else startTouchCapture(target);
 }));
 el("clear-calibration").addEventListener("click", () => {
@@ -654,11 +601,11 @@ el("clear-calibration").addEventListener("click", () => {
   endCalibration();
   utensilModels = {};
   saveUtensilModels();
-  el("calibration-help").textContent = "Calibration cleared. The tongs use their fixed zones until a face is calibrated.";
+  el("calibration-help").textContent = CALIBRATION_CLEARED;
 });
 el("presets").addEventListener("click", () => {
-  zoneIds.forEach((id, i) => { const x = 0.035 + i * 0.195; zones[id] = [[x, 0.6], [x + 0.15, 0.6], [x + 0.15, 0.93], [x, 0.93]]; });
-  saveZones(); el("zone-help").textContent = "Demo zones placed along the bottom of the frame. These are placeholders; calibrate them to match your surfaces.";
+  zones = demoLayout();
+  saveZones(); el("zone-help").textContent = DEMO_LAYOUT_HELP;
 });
 el("clear-zones").addEventListener("click", () => { zones = emptyZones(); saveZones(); });
 start.addEventListener("click", () => void startCamera());
@@ -732,5 +679,10 @@ el("export").addEventListener("click", () => {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
 window.addEventListener("pagehide", () => stopCamera());
+// Calibration saved on the dashboard (another tab, same origin) reaches us as a storage event.
+window.addEventListener("storage", event => {
+  if (event.key === ZONE_LAYOUT_STORAGE_KEY) { zones = loadZones(); saveZones(); }
+  else if (event.key === UTENSIL_MODELS_STORAGE_KEY) { utensilModels = loadModels(); saveUtensilModels(); }
+});
 saveZones();
 renderCalibration();

@@ -47,6 +47,21 @@ h2.alerting { color: var(--red); }
 .zone.wash { stroke: var(--wash); fill: var(--wash); stroke-dasharray: 10 6; }
 .fingertip { fill: #fff; stroke: #0009; stroke-width: 2; }
 .jaw { fill: #fff; stroke: var(--accent); stroke-width: 3; }
+/* Calibration on the feed (operator controls). */
+.stage.calibrating { cursor: crosshair; touch-action: none; }
+.zone.selected { stroke-width: 5; fill-opacity: .25; }
+.marker-box, .marker-frozen { fill: none; stroke: #ffdc70; stroke-width: 3; vector-effect: non-scaling-stroke; }
+.marker-frozen { stroke-dasharray: 8 6; }
+.zone-labels .marker-label { color: #ffdc70; }
+.draft-part { fill-opacity: .2; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.draft-part.tongs-tip { stroke: #baabff; fill: #baabff; }
+.draft-part.tongs-handle { stroke: #84b8ff; fill: #84b8ff; }
+.draft-line { fill: none; stroke: #fff; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.draft-line.rubber { stroke-dasharray: 6 4; }
+.draft-point { fill: #fff; }
+.draft-point.first { fill: var(--accent); }
+.draft-jaw { fill: #fff; stroke: var(--accent); stroke-width: 3; vector-effect: non-scaling-stroke; }
+.stage-flag.calibration-prompt { font-weight: 500; border-color: #3c5683; }
 .zone-labels span { position: absolute; transform: translate(-50%, -50%); background: #0d1117cc; color: var(--text); font-size: 12px; font-weight: 600; padding: 3px 7px; border-radius: 4px; white-space: nowrap; pointer-events: none; }
 .stage-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--muted); text-align: center; padding: 16px; }
 .stage-empty strong { font: 500 22px 'Space Grotesk', sans-serif; color: var(--text); }
@@ -135,6 +150,20 @@ details.panel[open] > summary h2::before { transform: rotate(90deg); }
 details.panel:not([open]) > summary h2 { margin-bottom: 0; }
 
 .controls { display: flex; flex-wrap: wrap; gap: 10px; }
+.controls + h2, .calibration h2 { margin-top: 22px; }
+.calibration .controls + .controls { margin-top: 10px; }
+.calibration-intro { margin-top: 0; }
+.zone-buttons { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; margin-bottom: 10px; }
+.zone-button { display: flex; justify-content: space-between; gap: 10px; text-align: left; }
+.zone-state { color: var(--muted); font-weight: 500; }
+.zone-state.warn { color: var(--amber); }
+.button[aria-pressed="true"] { border-color: var(--accent); background: #1d2a40; }
+.button:disabled { opacity: .5; cursor: not-allowed; }
+.calibration-readouts { display: grid; gap: 6px; margin: 0 0 12px; }
+.calibration-readouts div { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
+.calibration-readouts dt { color: var(--muted); }
+.calibration-readouts dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.calibration-help { font-size: 13px; line-height: 1.5; color: var(--muted); margin: 10px 0 0; min-height: 1.5em; }
 .esp-panel { grid-column: 1 / -1; }
 .esp-panel .zone-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .esp-panel .esp-config { margin-bottom: 12px; }

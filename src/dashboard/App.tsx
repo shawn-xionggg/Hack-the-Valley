@@ -1,5 +1,6 @@
 // GhostTrace dashboard (Person 3): renders EngineState and VisionStatus, and sends the manual events
-// (wash, acknowledge, reset) through engine.dispatch. Spec §3.3 wording lives in labels.ts.
+// (wash, acknowledge, reset) through engine.dispatch. Spec §3.3 wording lives in labels.ts. Operator
+// controls also calibrate zones and tongs, sharing storage with the vision page.
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { createEngine } from "../engine";
@@ -9,6 +10,7 @@ import type { ContactEvent, GhostEvent, UtensilWashedEvent, WashEvent } from "..
 import { DEMO_SCRIPT, MOVING_TONGS_SCRIPT } from "../sim/fixtures";
 import { chime } from "./chime";
 import { AlertPanel } from "./components/AlertPanel";
+import { CalibrationControls } from "./components/CalibrationControls";
 import { CameraView } from "./components/CameraView";
 import { CameraSource } from "./components/CameraSource";
 import { EventLog } from "./components/EventLog";
@@ -17,6 +19,7 @@ import { SurfaceCards } from "./components/SurfaceCards";
 import { VisionStrip } from "./components/VisionStrip";
 import { MANUAL_WASH_BUTTON, MANUAL_WASH_NOTE, SCOPE_NOTE } from "./labels";
 import { createSimulator } from "./simulation";
+import { useCalibration } from "./useCalibration";
 import { useEngineState } from "./useEngineState";
 import { useLiveVision } from "./useLiveVision";
 
@@ -37,6 +40,9 @@ export function App() {
   const dispatch = (event: GhostEvent) => engine.dispatch(event);
   const vision = useLiveVision((event: ContactEvent | WashEvent | UtensilWashedEvent) => { if (!simulated) dispatch(event); });
   const live = vision.phase === "live";
+  const calibration = useCalibration(vision);
+  /** Tag outlines show on the feed only while the operator controls are open. */
+  const [controlsOpen, setControlsOpen] = useState(false);
   const tracking = live && vision.frame ? vision.frame.status.utensils.tongs.tracking : null;
 
   // Handy from the console while testing on the rig: ghosttraceEngine.getState().
@@ -95,7 +101,8 @@ export function App() {
 
       <main className="layout">
         <section className="panel camera-panel" aria-label="Camera">
-          <CameraView vision={vision} surfaces={state.surfaces} mirrored={mirrored} paused={simulated} />
+          <CameraView vision={vision} surfaces={state.surfaces} mirrored={mirrored} paused={simulated}
+            calibration={calibration} showMarkers={controlsOpen} />
           <div className="camera-toolbar">
             {vision.phase === "off"
               ? <button className="button primary" onClick={() => vision.start(deviceId || undefined)}>Start camera</button>
@@ -108,7 +115,7 @@ export function App() {
                 }} />
             )}
             <label className="check"><input type="checkbox" checked={mirrored} onChange={event => setMirrored(event.target.checked)} /> Mirror</label>
-            <a className="link" href="./">Calibrate zones and tongs ↗</a>
+            <a className="link" href="./">Vision page ↗</a>
           </div>
           <p className={`camera-message${vision.message.error ? " error" : ""}`} role="status">{vision.message.text}</p>
           <VisionStrip frame={live ? vision.frame : null} lastWash={state.lastWash} />
@@ -125,8 +132,8 @@ export function App() {
 
         <EspConnectionPanel engine={engine} />
 
-        {/* Operator-only controls stay out of the way: the worker's own action (replacing tongs) is under the cards. */}
-        <details className="panel controls-panel">
+        {/* Operator-only controls stay out of the way of the worker's view. */}
+        <details className="panel controls-panel" onToggle={event => setControlsOpen(event.currentTarget.open)}>
           <summary><h2>Operator controls</h2></summary>
           <div className="controls">
             <button className="button" onClick={reset}>Reset session</button>
@@ -144,6 +151,8 @@ export function App() {
             <button className="button" onClick={() => simulate(MOVING_TONGS_SCRIPT.events)}>Act 2 · moving tongs</button>
             {simulator.playing && <button className="button" onClick={() => simulator.cancel()}>Stop replay</button>}
           </div>
+          <h2>Calibration</h2>
+          <CalibrationControls vision={vision} calibration={calibration} />
         </details>
 
         <details className="panel log-panel">

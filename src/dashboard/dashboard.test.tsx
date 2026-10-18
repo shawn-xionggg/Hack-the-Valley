@@ -8,11 +8,16 @@ import { DEMO_SCRIPT, MOVING_TONGS_SCRIPT, SCENARIOS, alertId } from "../sim/fix
 import type { Scenario } from "../sim/fixtures";
 import { App } from "./App";
 import { AlertPanel } from "./components/AlertPanel";
+import { CalibrationControls } from "./components/CalibrationControls";
+import { CameraView } from "./components/CameraView";
 import { CameraSource } from "./components/CameraSource";
 import { SurfaceCards } from "./components/SurfaceCards";
 import { VisionStrip } from "./components/VisionStrip";
 import * as labels from "./labels";
 import { createSimulator } from "./simulation";
+import type { Calibration } from "./useCalibration";
+import type { LiveVision } from "./useLiveVision";
+import { CALIBRATION_IDLE_HELP, CALIBRATION_STEPS, ZONE_IDLE_HELP, emptyZones } from "../vision/calibration";
 
 /** Invariant 5: no UI text says safe, clean, allergen-free or verified. "not verified" is the required wash label. */
 function forbiddenWords(text: string): string[] {
@@ -164,7 +169,7 @@ describe("dashboard rendering", () => {
 
   it("shows the tong dwell beside the hand ring only while the tongs are in the sink (A3)", () => {
     const frame = (washProgress: number, utensilWashProgress: number) => ({
-      fingertips: [], jawPoints: null,
+      fingertips: [], jawPoints: null, markers: [], markerFrame: null,
       status: { t: 0, handsVisible: 2, activeZones: [], washProgress, utensilWashProgress, fps: 20, activeToolContacts: [],
         utensils: { tongs: { tracking: "tracked" as const, parts: null, lastSeenT: 0 } } },
     });
@@ -238,5 +243,51 @@ describe("SIMULATED replay", () => {
     vi.advanceTimersByTime(10_000);
     expect(sim.playing).toBe(false);
     expect(engine.getState().log).toHaveLength(2); // the reset and the first step
+  });
+});
+
+describe("operator calibration", () => {
+  const tag = { id: 11, corners: [[0.475, 0.475], [0.525, 0.475], [0.525, 0.525], [0.475, 0.525]] as [number, number][] };
+  const vision = (phase: LiveVision["phase"]): LiveVision => ({
+    videoRef: { current: null }, phase, message: { text: "", error: false }, size: { width: 1000, height: 1000 },
+    frame: phase !== "live" ? null : {
+      status: { t: 0, handsVisible: 0, activeZones: [], washProgress: 0, utensilWashProgress: 0, fps: 20, activeToolContacts: [],
+        utensils: { tongs: { tracking: "fixed", parts: null, lastSeenT: 0 } } },
+      fingertips: [], jawPoints: null, markers: [tag], markerFrame: { width: 1000, height: 1000, ms: 3 },
+    },
+    zones: { ...emptyZones(), "meal-1": [[0.6, 0.6], [0.8, 0.6], [0.8, 0.8], [0.6, 0.8]] }, utensilModels: {},
+    cameras: [], activeCameraId: "", start() {}, stop() {}, saveZones: () => true, saveUtensilModels: () => true, addMarkerListener: () => () => {},
+  });
+  const calibration = (patch: Partial<Calibration> = {}): Calibration => ({
+    draft: [], closing: false, zoneHelp: ZONE_IDLE_HELP, tongHelp: CALIBRATION_IDLE_HELP, drawing: false, prompt: null,
+    pointerDown() {}, pointerMove() {}, pointerLeave() {}, toggleZone() {}, applyDemoLayout() {}, clearZones() {},
+    toggleFace() {}, toggleTouch() {}, clearTongs() {}, ...patch,
+  });
+
+  it("offers zone, tong-face and touch-height calibration, enabled only with the camera live", () => {
+    const off = renderToStaticMarkup(<CalibrationControls vision={vision("off")} calibration={calibration()} />);
+    const live = renderToStaticMarkup(<CalibrationControls vision={vision("live")} calibration={calibration()} />);
+    for (const text of ["Allergen source", "Meal · Order #4", "Sink", "Calibrate ID 11", "Calibrate ID 12", "Record plate touch",
+      "Record peanut touch", "Use demo layout", "Clear calibration", "Print tong markers 11 + 12"]) expect(live).toContain(text);
+    expect(live).toContain("1 / 5");
+    expect(live).toContain("11 · 50 px");
+    expect(off).toContain("The camera is off, so calibration is paused.");
+    expect(off.match(/disabled=""/g)!.length).toBeGreaterThan(live.match(/disabled=""/g)!.length);
+    expect([...forbiddenWords(off), ...forbiddenWords(live)]).toEqual([]);
+  });
+
+  it("draws the outline in progress and the frozen marker on the feed, with the step's instruction", () => {
+    const tong = { markerId: 11, corners: tag.corners, step: "tongs-tip" as const, parts: {} };
+    const html = renderToStaticMarkup(<CameraView vision={vision("live")} surfaces={run({ ...DEMO_SCRIPT, events: [] }).surfaces}
+      mirrored={false} paused={false} showMarkers
+      calibration={calibration({ tong, drawing: true, prompt: `ID 11: ${CALIBRATION_STEPS["tongs-tip"]}`,
+        draft: [[0.1, 0.1], [0.2, 0.1], [0.2, 0.2]], cursor: [0.15, 0.25] })} />);
+    expect(html).toContain('class="stage calibrating"');
+    expect(html).toContain("marker-frozen");
+    expect(html).toContain("draft-line rubber");
+    expect(html).toContain("ArUco 11");
+    expect(html).toContain("Outline the tong tips.");
+    expect(html).not.toContain("Zones not calibrated"); // the drawing prompt replaces the reminder
+    expect(forbiddenWords(html)).toEqual([]);
   });
 });

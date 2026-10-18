@@ -2,7 +2,7 @@
 // labels can be checked in one place (labels.test.ts). No text may say safe, clean, allergen-free or verified
 // (invariant 5), except the required "not verified" wash label.
 
-import type { ExposableSurfaceId, ToolSurface } from "../shared/config";
+import type { ExposableSurfaceId, ToolSurface, ZonedObjectId } from "../shared/config";
 import type { ChainStep, LogEffect, LoggedEvent, SurfaceStatus } from "../shared/engine-types";
 import type { UtensilTracking, WashMethod } from "../shared/events";
 
@@ -39,6 +39,14 @@ export const UTENSIL_WASH_LABEL = "Tongs washed (detected, not verified)";
 
 /** A3: the wash zone is a marked sink (overlay label and status strip heading). */
 export const SINK_LABEL = "Sink";
+/** Names for every calibrated zone, the sink included. */
+export const ZONE_LABELS: Record<ZonedObjectId, string> = {
+  "peanut-source": SURFACE_LABELS["peanut-source"],
+  "tongs-tip": SURFACE_LABELS["tongs-tip"],
+  "tongs-handle": SURFACE_LABELS["tongs-handle"],
+  "meal-1": SURFACE_LABELS["meal-1"],
+  "wash-station": SINK_LABEL,
+};
 /** Status strip headline, by what the sink dwell is doing. A utensil dwell only runs inside a hand dwell (§4.4). */
 export const SINK_PROMPTS = {
   utensil: "Hold hands and tongs in the sink…",

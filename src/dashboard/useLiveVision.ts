@@ -1,5 +1,5 @@
-// Camera + startVision for the dashboard. Zones and tong models are calibrated on the vision dev page
-// (index.html) and read here from localStorage; recalibrating in another tab updates a running camera.
+// Camera + startVision for the dashboard. Zones and tong models live in localStorage: they're calibrated
+// here (operator controls) or on the vision dev page (index.html), and either page picks up the other's changes.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
@@ -8,6 +8,7 @@ import type { Point, UtensilModels, ZoneLayout } from "../shared/config";
 import type { ContactEvent, UtensilWashedEvent, VisionStatus, WashEvent } from "../shared/events";
 import type { VisionHandle } from "../shared/vision-types";
 import { startVision } from "../vision";
+import type { DetectedMarker, MarkerFrame } from "../vision/aruco";
 import { openStableCamera } from "../vision/camera";
 import { parseZoneLayout } from "../vision/geometry";
 import { parseUtensilModels } from "../vision/pose";
@@ -21,7 +22,12 @@ export interface VisionFrame {
   fingertips: Point[];
   /** Jaw ends of the current tong pose; null unless tracked or held. */
   jawPoints: Point[] | null;
+  /** ArUco tags seen on this frame, for calibration. */
+  markers: DetectedMarker[];
+  markerFrame: MarkerFrame | null;
 }
+
+export type MarkerListener = (markers: DetectedMarker[], frame: MarkerFrame) => void;
 
 export interface LiveVision {
   videoRef: RefObject<HTMLVideoElement | null>;
@@ -36,6 +42,11 @@ export interface LiveVision {
   activeCameraId: string;
   start(deviceId?: string): void;
   stop(): void;
+  /** Store and apply a new calibration. False if browser storage failed (it still applies for this session). */
+  saveZones(next: ZoneLayout): boolean;
+  saveUtensilModels(next: UtensilModels): boolean;
+  /** Every frame's tag detections, unbatched (touch capture needs each frame). Returns the unsubscribe. */
+  addMarkerListener(listener: MarkerListener): () => void;
 }
 
 const EMPTY_ZONES: ZoneLayout = { "peanut-source": [], "tongs-tip": [], "tongs-handle": [], "meal-1": [], "wash-station": [] };
@@ -74,6 +85,7 @@ export function useLiveVision(onEvent: (event: ContactEvent | WashEvent | Utensi
   const generation = useRef(0);
   const zonesRef = useRef(zones);
   const modelsRef = useRef(utensilModels);
+  const markerListeners = useRef(new Set<MarkerListener>());
 
   const stop = useCallback((text = "Camera stopped.", error = false) => {
     generation.current++;
@@ -124,6 +136,8 @@ export function useLiveVision(onEvent: (event: ContactEvent | WashEvent | Utensi
         setMessage({ text: `${cameraName} connected. Loading the hand-tracking model — the first start may take a moment…`, error: false });
         let fingertips: Point[] = [];
         let jawPoints: Point[] | null = null;
+        let markers: DetectedMarker[] = [];
+        let markerFrame: MarkerFrame | null = null;
         const handle = await startVision({
           video,
           zones: zonesRef.current,
@@ -134,8 +148,13 @@ export function useLiveVision(onEvent: (event: ContactEvent | WashEvent | Utensi
               DEFAULT_TUNING.fingertipLandmarks.flatMap(n => { const p = hand[n]; return p ? [[p.x, p.y] as Point] : []; }));
           },
           onJawPoints: points => { jawPoints = points; },
-          // One React update per processed frame (≤ 20 fps); onResults and onJawPoints run just before this.
-          onStatus: status => { if (attempt === generation.current) setFrame({ status, fingertips, jawPoints }); },
+          // Detection runs even before a tong model exists, so a face can be calibrated.
+          onMarkers: (next, nextFrame) => {
+            markers = next; markerFrame = nextFrame;
+            if (attempt === generation.current) markerListeners.current.forEach(listener => listener(next, nextFrame));
+          },
+          // One React update per processed frame (≤ 20 fps); the callbacks above run just before this.
+          onStatus: status => { if (attempt === generation.current) setFrame({ status, fingertips, jawPoints, markers, markerFrame }); },
           onError: error => {
             if (attempt === generation.current) stop(`Tracking stopped: ${error instanceof Error ? error.message : String(error)}. Try starting again.`, true);
           },
@@ -152,6 +171,28 @@ export function useLiveVision(onEvent: (event: ContactEvent | WashEvent | Utensi
       }
     })();
   }, [stop]);
+
+  const saveZones = useCallback((next: ZoneLayout) => {
+    zonesRef.current = next;
+    setZones(next);
+    session.current.vision?.setZones(next);
+    try { localStorage.setItem(ZONE_LAYOUT_STORAGE_KEY, JSON.stringify(next)); return true; }
+    catch { return false; }
+  }, []);
+  const saveUtensilModels = useCallback((next: UtensilModels) => {
+    modelsRef.current = next;
+    setUtensilModels(next);
+    session.current.vision?.setUtensilModels(next);
+    try {
+      if (next.tongs) localStorage.setItem(UTENSIL_MODELS_STORAGE_KEY, JSON.stringify(next));
+      else localStorage.removeItem(UTENSIL_MODELS_STORAGE_KEY);
+      return true;
+    } catch { return false; }
+  }, []);
+  const addMarkerListener = useCallback((listener: MarkerListener) => {
+    markerListeners.current.add(listener);
+    return () => { markerListeners.current.delete(listener); };
+  }, []);
 
   // Recalibration on the vision page (another tab, same origin) reaches us as a storage event.
   useEffect(() => {
@@ -178,5 +219,8 @@ export function useLiveVision(onEvent: (event: ContactEvent | WashEvent | Utensi
     return () => { window.removeEventListener("pagehide", onHide); stop(); };
   }, [stop]);
 
-  return { videoRef, phase, message, frame, size, zones, utensilModels, cameras, activeCameraId, start, stop };
+  return {
+    videoRef, phase, message, frame, size, zones, utensilModels, cameras, activeCameraId, start, stop,
+    saveZones, saveUtensilModels, addMarkerListener,
+  };
 }
