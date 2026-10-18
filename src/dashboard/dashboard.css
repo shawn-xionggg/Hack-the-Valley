@@ -1,4 +1,4 @@
-/* GhostTrace dashboard. Status colours follow spec §3.3: "No tracked exposure" is grey-blue, never green,
+/* Allos dashboard. Status colours follow spec §3.3: "No tracked exposure" is grey-blue, never green,
    and nothing on this page uses green, since green reads as "safe". Sized for a big demo monitor. */
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
 

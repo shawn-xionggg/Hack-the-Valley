@@ -1,5 +1,5 @@
-// GhostTrace engine API and state shape — what the dashboard renders and what
-// the engine (Person 2) must implement. Spec: GhostTrace-summary-v5.md.
+// Allos engine API and state shape — what the dashboard renders and what
+// the engine (Person 2) must implement. Spec: Allos-summary-v5.md.
 
 import type {
   Allergen,
@@ -10,7 +10,7 @@ import type {
   Tuning,
   UtensilId,
 } from "./config";
-import type { GhostEvent, WashMethod } from "./events";
+import type { AllosEvent, WashMethod } from "./events";
 
 /**
  * "no-tracked-exposure": the engine has recorded no potential exposure on this surface
@@ -83,7 +83,7 @@ export type LogEffect =
   | "ignored-invalid-contact"; // contact pair not allowed (tip↔handle, a === b, tool↔tool)
 
 export interface LoggedEvent {
-  event: GhostEvent;
+  event: AllosEvent;
   effect: LogEffect;
 }
 
@@ -106,7 +106,7 @@ export interface EngineOptions {
 
 export interface Engine {
   /** Apply one event; returns the new state. Never throws on bad input — it logs an ignored effect instead. */
-  dispatch(event: GhostEvent): EngineState;
+  dispatch(event: AllosEvent): EngineState;
   getState(): EngineState;
   /** Called after every dispatch. Returns an unsubscribe function. */
   subscribe(listener: (state: EngineState) => void): () => void;

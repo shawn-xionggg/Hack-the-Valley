@@ -75,7 +75,7 @@ its normal Wi-Fi/internet connection. No IP address or router configuration is n
    and click **Connect ESP**. The vision/calibration page also has the same
    controls under **Exposure tracking**. Connect from the page you are using;
    keep one page connected to the board at a time.
-4. In the browser's Bluetooth chooser, select **GhostTrace-ESP** and connect.
+4. In the browser's Bluetooth chooser, select **Allos-ESP** and connect.
    Select it through the app, rather than pairing it in Windows Bluetooth settings.
 5. The LED turns blue when connected with no alert. **Replay Act 2**
    triggers red-only flashes and the active buzzer when the meal gets an alert.
@@ -90,7 +90,7 @@ explanation in the app; USB is available as a fallback.
 
 If the device is missing, upload this Bluetooth firmware, check its power, move it
 nearby, and disconnect it from other app tabs/devices. It only advertises the
-GhostTrace service with the updated firmware. After a disconnect it starts
+Allos service with the updated firmware. After a disconnect it starts
 advertising again so **Connect ESP** can reconnect. Keep one app connected at a time.
 
 ## USB fallback

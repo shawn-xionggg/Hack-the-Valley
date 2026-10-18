@@ -60,7 +60,7 @@ function rig() {
   return { ble, device, requestDevice, statuses, engine, onReset };
 }
 
-it("selects the GhostTrace BLE service and sends the existing risk verdict", async () => {
+it("selects the Allos BLE service and sends the existing risk verdict", async () => {
   const { ble, device, engine, requestDevice, statuses } = rig();
   await ble.connect();
   expect(requestDevice).toHaveBeenCalledWith({ filters: [{ services: [ESP_BLE_SERVICE] }] });

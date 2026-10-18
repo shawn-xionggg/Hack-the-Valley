@@ -1,4 +1,4 @@
-﻿# GhostTrace - camera frontend
+﻿# Allos - camera frontend
 
 Minimal TypeScript + Vite camera UI using MediaPipe Hand Landmarker. Tracks up to two hands and draws 21 landmarks per hand. Webcam frames go directly to the model in the browser. No video uploads, API key, or backend required.
 
@@ -64,10 +64,10 @@ Tool contacts fire when a jaw end (white dot) comes within 0.6 tag widths (about
 
 ## Integrate with the engine
 
-`src/vision/index.ts` exports `startVision`, compatible with `StartVision` from `src/shared/vision-types.ts`. Supply a playing raw video element, calibrated zones, `onEvent`, and `onStatus`, plus `utensilModels` (from `parseUtensilModels` in `src/vision/pose.ts`, reading `ghosttrace.utensils.v2`) for moving tongs. The handle supports `stop()`, `setZones()` and `setUtensilModels()`. `VisionStatus.utensils.tongs` carries the tracking state and the current tip and handle polygons. The UI also emits a `ghosttrace:vision-event` CustomEvent on window for each shared contact/wash event:
+`src/vision/index.ts` exports `startVision`, compatible with `StartVision` from `src/shared/vision-types.ts`. Supply a playing raw video element, calibrated zones, `onEvent`, and `onStatus`, plus `utensilModels` (from `parseUtensilModels` in `src/vision/pose.ts`, reading `ghosttrace.utensils.v2`) for moving tongs. The handle supports `stop()`, `setZones()` and `setUtensilModels()`. `VisionStatus.utensils.tongs` carries the tracking state and the current tip and handle polygons. The UI also emits an `allos:vision-event` CustomEvent on window for each shared contact/wash event:
 
 ```ts
-window.addEventListener("ghosttrace:vision-event", event => {
+window.addEventListener("allos:vision-event", event => {
   // engine.dispatch((event as CustomEvent).detail);
 });
 ```

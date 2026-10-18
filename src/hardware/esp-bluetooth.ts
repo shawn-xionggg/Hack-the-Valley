@@ -2,7 +2,7 @@ import type { EngineState } from "../shared/engine-types";
 import { espCommand } from "./esp-alerts";
 import type { EspConnectionStatus } from "./esp-alerts";
 
-// These UUIDs identify GhostTrace's BLE service and command characteristic.
+// These UUIDs identify Allos's BLE service and command characteristic.
 export const ESP_BLE_SERVICE = "b584b401-7e4b-4ec3-b6c4-781203a99270";
 export const ESP_BLE_COMMAND = "b584b402-7e4b-4ec3-b6c4-781203a99270";
 export const ESP_BLE_RESET = "b584b403-7e4b-4ec3-b6c4-781203a99270";
@@ -57,7 +57,7 @@ export class EspBluetoothAlerts {
     private readonly onStatus: (status: EspConnectionStatus) => void,
     private readonly onPress: () => void = () => {}) {
     this.phase = bluetooth ? "disconnected" : "unsupported";
-    this.report(this.phase, bluetooth ? "ESP not connected. Connect via Bluetooth and select GhostTrace-ESP." :
+    this.report(this.phase, bluetooth ? "ESP not connected. Connect via Bluetooth and select Allos-ESP." :
       "Bluetooth unavailable. Use desktop Chrome or Edge on localhost or HTTPS with Bluetooth enabled.");
   }
 
@@ -74,7 +74,7 @@ export class EspBluetoothAlerts {
     const generation = ++this.generation;
     this.pending = Promise.resolve();
     this.sending = false;
-    this.report("connecting", "Select GhostTrace-ESP in the Bluetooth chooser...");
+    this.report("connecting", "Select Allos-ESP in the Bluetooth chooser...");
     try {
       const device = await this.bluetooth.requestDevice({ filters: [{ services: [ESP_BLE_SERVICE] }] });
       if (generation !== this.generation) return;

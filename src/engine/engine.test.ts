@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { EngineState } from "../shared/engine-types";
-import type { GhostEvent } from "../shared/events";
+import type { AllosEvent } from "../shared/events";
 import { DEMO_SCRIPT, SCENARIOS, ScriptBuilder, alertId, formatChain } from "../sim/fixtures";
 import type { Expectation } from "../sim/fixtures";
 import { createEngine } from "./engine";
@@ -29,7 +29,7 @@ describe("createEngine acceptance scenarios", () => {
 describe("createEngine", () => {
   it("logs every event with an effect, and ignores a repeated id of any kind", () => {
     const engine = createEngine();
-    const wash: GhostEvent = { id: "w", t: 1, kind: "wash", method: "manual-tap", source: "manual", verified: false };
+    const wash: AllosEvent = { id: "w", t: 1, kind: "wash", method: "manual-tap", source: "manual", verified: false };
     engine.dispatch(wash);
     const state = engine.dispatch(wash);
     expect(state.log.map(entry => entry.effect)).toEqual(["applied", "ignored-duplicate-id"]);
@@ -76,7 +76,7 @@ describe("createEngine", () => {
       .toolContact("tongs-tip", "peanut-source").toolContact("tongs-tip", "meal-1").events;
     events.forEach(event => engine.dispatch(event));
     const before = engine.getState();
-    const reset: GhostEvent = { kind: "meal-reset", mealId: "meal-1", id: "meal-replacement", t: 5000, source: "manual" };
+    const reset: AllosEvent = { kind: "meal-reset", mealId: "meal-1", id: "meal-replacement", t: 5000, source: "manual" };
     const after = engine.dispatch(reset);
     expect(after.sessionId).toBe(before.sessionId);
     expect(after.lastWash).toEqual(before.lastWash);
@@ -97,7 +97,7 @@ describe("createEngine", () => {
     const duplicate = engine.dispatch(reset);
     expect(duplicate.log.at(-1)?.effect).toBe("ignored-duplicate-id");
     expect(duplicate.records).toEqual(after.records);
-    const contact: GhostEvent = { kind: "contact", a: "tongs-tip", b: "meal-1", confidence: 1,
+    const contact: AllosEvent = { kind: "contact", a: "tongs-tip", b: "meal-1", confidence: 1,
       id: "replacement-contact", t: 6000, source: "camera" };
     const exposedAgain = engine.dispatch(contact);
     expect(exposedAgain.alerts[0]?.id).not.toBe(before.alerts[0]?.id);
@@ -113,7 +113,7 @@ describe("createEngine", () => {
     new ScriptBuilder().contact("peanut-source").events.forEach(event => engine.dispatch(event));
     const before = engine.getState();
     const after = engine.dispatch({ kind: "meal-reset", mealId: "hands", id: "bad-meal", t: 2000,
-      source: "manual" } as unknown as GhostEvent);
+      source: "manual" } as unknown as AllosEvent);
     expect(after.records).toEqual(before.records);
     expect(after.surfaces).toEqual(before.surfaces);
     expect(after.log.at(-1)?.effect).toBe("no-change");
@@ -143,8 +143,8 @@ describe("createEngine", () => {
     const engine = createEngine();
     vi.spyOn(console, "error").mockImplementation(() => {});
     engine.subscribe(() => { throw new Error("listener"); });
-    expect(() => engine.dispatch(null as unknown as GhostEvent)).not.toThrow();
-    expect(() => engine.dispatch({ id: "x", t: 1, kind: "mystery" } as unknown as GhostEvent)).not.toThrow();
+    expect(() => engine.dispatch(null as unknown as AllosEvent)).not.toThrow();
+    expect(() => engine.dispatch({ id: "x", t: 1, kind: "mystery" } as unknown as AllosEvent)).not.toThrow();
     expect(engine.getState().log.at(-1)!.effect).toBe("no-change");
     vi.restoreAllMocks();
   });
@@ -191,7 +191,7 @@ describe("createEngine utensil wash (A3)", () => {
 
   it("ignores a repeated utensil-washed id", () => {
     const engine = createEngine();
-    const event: GhostEvent = { id: "u", t: 1, kind: "utensil-washed", utensilId: "tongs", method: "zone-dwell", source: "sim", verified: false };
+    const event: AllosEvent = { id: "u", t: 1, kind: "utensil-washed", utensilId: "tongs", method: "zone-dwell", source: "sim", verified: false };
     engine.dispatch(event);
     const state = engine.dispatch({ ...event, t: 2 });
     expect(state.log.map(entry => entry.effect)).toEqual(["applied", "ignored-duplicate-id"]);

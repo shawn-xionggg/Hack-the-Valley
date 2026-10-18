@@ -39,7 +39,7 @@ function readEvents(file: string): VisionEvent[] {
   try { parsed = JSON.parse(readFileSync(file, "utf8")); }
   catch (error) { fail(`Could not read ${file}: ${error instanceof Error ? error.message : String(error)}`); }
   const events = (parsed as { events?: unknown })?.events;
-  if (!Array.isArray(events)) fail(`${file} has no "events" array. Is it a GhostTrace "Export JSON" file?`);
+  if (!Array.isArray(events)) fail(`${file} has no "events" array. Is it an Allos "Export JSON" file?`);
   return events.filter((e): e is VisionEvent => e?.kind === "contact" || e?.kind === "wash" || e?.kind === "utensil-washed");
 }
 

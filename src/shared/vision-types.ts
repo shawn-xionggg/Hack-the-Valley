@@ -1,5 +1,5 @@
-// GhostTrace vision module API — what Person 1 implements and Person 2 wires up.
-// Spec: GhostTrace-summary-v5.md ("Module contracts").
+// Allos vision module API — what Person 1 implements and Person 2 wires up.
+// Spec: Allos-summary-v5.md ("Module contracts").
 
 import type { Tuning, UtensilModels, ZoneLayout } from "./config";
 import type { ContactEvent, UtensilWashedEvent, VisionStatus, WashEvent } from "./events";

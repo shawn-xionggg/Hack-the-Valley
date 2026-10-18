@@ -40,7 +40,7 @@ let utensilModels = loadModels();
 
 document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
   <header class="topbar">
-    <a class="brand" href="./" aria-label="GhostTrace home"><span class="brand-mark">g.</span> GhostTrace</a>
+    <a class="brand" href="./" aria-label="Allos home"><span class="brand-mark">a.</span> Allos</a>
     <span class="top-note">VISION PROTOTYPE <span class="version">v0.1</span></span>
   </header>
   <main>
@@ -54,7 +54,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         <div class="stage" id="stage">
           <div class="feed" id="feed"><video id="video" autoplay muted playsinline></video><canvas id="overlay" aria-label="Hand landmarks and calibrated zones"></canvas></div>
           <div class="empty-state" id="empty"><div class="camera-icon" aria-hidden="true">◎</div><h3>Your workspace, in view.</h3><p>Start your camera to begin live hand tracking.<br />Frames are processed on this device.</p></div>
-          <span class="stage-label">GHOSTTRACE / LIVE</span>
+          <span class="stage-label">ALLOS / LIVE</span>
         </div>
         <div class="camera-toolbar"><div class="camera-select"><label for="camera">Camera source</label><select id="camera"><option value="">Auto — main rear camera</option></select></div>
           <label class="check"><input type="checkbox" id="mirror" /> Mirror</label>
@@ -308,7 +308,7 @@ function logEvent(event: ContactEvent | WashEvent | UtensilWashedEvent) {
   el<HTMLButtonElement>("export").disabled = false;
   enginePanel.onVisionEvent(event);
   // Integration point for a dashboard/engine without coupling the camera UI to it.
-  window.dispatchEvent(new CustomEvent("ghosttrace:vision-event", { detail: event }));
+  window.dispatchEvent(new CustomEvent("allos:vision-event", { detail: event }));
 }
 
 function onMarkers(next: DetectedMarker[], frame: { width: number; height: number; ms: number }) {
@@ -675,7 +675,7 @@ el("clear-events").addEventListener("click", () => {
 });
 el("export").addEventListener("click", () => {
   const url = URL.createObjectURL(new Blob([JSON.stringify({ zones, utensilModels, events }, null, 2)], { type: "application/json" }));
-  const anchor = document.createElement("a"); anchor.href = url; anchor.download = "ghosttrace-vision.json"; anchor.click();
+  const anchor = document.createElement("a"); anchor.href = url; anchor.download = "allos-vision.json"; anchor.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
 window.addEventListener("pagehide", () => stopCamera());

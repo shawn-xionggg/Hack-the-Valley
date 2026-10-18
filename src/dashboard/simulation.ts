@@ -2,14 +2,14 @@
 // The dashboard shows a banner the whole time a simulated session is active (spec §3.3, §10 item 9).
 
 import type { Engine } from "../shared/engine-types";
-import type { GhostEvent } from "../shared/events";
+import type { AllosEvent } from "../shared/events";
 
 /** Spacing between scripted events: long enough to narrate each step. */
 export const SIM_STEP_MS = 1500;
 
 export interface Simulator {
   /** Reset the session, then dispatch the script's events one per stepMs. Cancels any replay in progress. */
-  play(script: readonly GhostEvent[]): void;
+  play(script: readonly AllosEvent[]): void;
   /** Stop dispatching. The session stays simulated until the caller resets it. */
   cancel(): void;
   /** True while events are still queued. */

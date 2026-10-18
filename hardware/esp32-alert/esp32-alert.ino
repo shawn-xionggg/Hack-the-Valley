@@ -112,7 +112,7 @@ void startBluetooth() {
     Serial.println("BLE command queue could not be created; reset the ESP.");
     return;
   }
-  BLEDevice::init("GhostTrace-ESP");
+  BLEDevice::init("Allos-ESP");
   bleServer = BLEDevice::createServer();
   bleServer->setCallbacks(new AlertBleServerCallbacks());
   BLEService *service = bleServer->createService(BLE_SERVICE_UUID);
@@ -125,7 +125,7 @@ void startBluetooth() {
   advertising->addServiceUUID(BLE_SERVICE_UUID);
   advertising->setScanResponse(true);
   advertising->start();
-  Serial.println("Bluetooth ready: select GhostTrace-ESP in the app's Connect ESP chooser.");
+  Serial.println("Bluetooth ready: select Allos-ESP in the app's Connect ESP chooser.");
 }
 
 void pollBluetooth() {

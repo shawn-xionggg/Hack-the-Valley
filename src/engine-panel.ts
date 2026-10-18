@@ -6,7 +6,7 @@ import { createEngine } from "./engine";
 import { ORDERS } from "./shared/config";
 import type { ExposableSurfaceId, ToolSurface } from "./shared/config";
 import type { Alert, ChainStep, EngineState, LoggedEvent, SurfaceStatus } from "./shared/engine-types";
-import type { ContactEvent, GhostEvent, UtensilTracking, UtensilWashedEvent, WashEvent, WashMethod } from "./shared/events";
+import type { ContactEvent, AllosEvent, UtensilTracking, UtensilWashedEvent, WashEvent, WashMethod } from "./shared/events";
 import { DEMO_SCRIPT, MOVING_TONGS_SCRIPT } from "./sim/fixtures";
 import { mountEspPanel } from "./hardware/esp-panel";
 
@@ -86,8 +86,8 @@ export interface EnginePanel {
 
 export function mountEnginePanel(container: HTMLElement): EnginePanel {
   const engine = createEngine();
-  // Handy from the console while testing on the rig: ghosttraceEngine.getState().
-  Object.assign(window, { ghosttraceEngine: engine });
+  // Handy from the console while testing on the rig: allosEngine.getState().
+  Object.assign(window, { allosEngine: engine });
   let tracking: UtensilTracking | null = null;
   let simulated = false;
   let replay: number | undefined;
@@ -194,7 +194,7 @@ export function mountEnginePanel(container: HTMLElement): EnginePanel {
     if (fresh.some(alert => !alert.acknowledged)) chime();
   }
 
-  function dispatch(event: GhostEvent) { engine.dispatch(event); }
+  function dispatch(event: AllosEvent) { engine.dispatch(event); }
 
   function stopReplay() {
     if (replay !== undefined) clearTimeout(replay);
@@ -202,7 +202,7 @@ export function mountEnginePanel(container: HTMLElement): EnginePanel {
   }
 
   /** SIMULATED mode: a fresh session, then the fixture script through the real engine with live ids and times. */
-  function simulate(script: GhostEvent[]) {
+  function simulate(script: AllosEvent[]) {
     stopReplay();
     simulated = true;
     dispatch({ ...stamp(), kind: "session-reset", source: "sim" });

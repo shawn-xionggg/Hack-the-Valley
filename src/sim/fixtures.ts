@@ -1,11 +1,11 @@
-// GhostTrace test fixtures and the canonical demo script.
+// Allos test fixtures and the canonical demo script.
 // Used by: engine unit tests (Person 2), SIMULATED mode (Person 3), and as the
-// executable definition of the demo. Spec: GhostTrace-summary-v5.md.
+// executable definition of the demo. Spec: Allos-summary-v5.md.
 
 import type { ContactTarget, ExposableSurfaceId, Order, ToolContactTarget, ToolSurface, UtensilId } from "../shared/config";
 import { ORDERS } from "../shared/config";
 import type { ChainStep, SurfaceStatus } from "../shared/engine-types";
-import type { GhostEvent, WashMethod } from "../shared/events";
+import type { AllosEvent, WashMethod } from "../shared/events";
 
 /** Alert ids are deterministic so fixtures and UIs can reference them: one alert per meal per allergen per session. */
 export const alertId = (mealId: string, allergen: string): string => `alert:${mealId}:${allergen}`;
@@ -13,7 +13,7 @@ export const alertId = (mealId: string, allergen: string): string => `alert:${me
 /** Builds a deterministic event list: ids e1, e2, … and t = 1000, 2000, … */
 export class ScriptBuilder {
   private n = 0;
-  readonly events: GhostEvent[] = [];
+  readonly events: AllosEvent[] = [];
 
   private next(): { id: string; t: number } {
     this.n += 1;
@@ -33,7 +33,7 @@ export class ScriptBuilder {
 
   /** A pair the contract forbids (e.g. tip↔handle), cast past the types to test the engine guard. */
   invalidContact(a: ExposableSurfaceId, b: ExposableSurfaceId): this {
-    this.events.push({ kind: "contact", a, b, confidence: 1, source: "sim", ...this.next() } as unknown as GhostEvent);
+    this.events.push({ kind: "contact", a, b, confidence: 1, source: "sim", ...this.next() } as unknown as AllosEvent);
     return this;
   }
 
@@ -97,7 +97,7 @@ export interface Expectation {
 export interface Scenario {
   name: string;
   orders?: Order[]; // defaults to ORDERS
-  events: GhostEvent[];
+  events: AllosEvent[];
   /** Optional per-event expectations, index-aligned with events. */
   afterEach?: (Expectation | null)[];
   /** Expectations after all events are applied. */

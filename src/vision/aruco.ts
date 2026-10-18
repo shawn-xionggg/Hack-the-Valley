@@ -91,7 +91,7 @@ export function createTongMarkerSheet(blackSquareMm: readonly number[] = [25, 30
       <figcaption><b>ID ${id}</b> · ${TONG_ARMS[id]} outer face<br>${size} mm black square</figcaption></figure>`).join("")}</div>`;
   }).join("");
   const ticks = [0, 10, 20, 30, 40, 50].map(x => `<rect x="${x === 50 ? 49.7 : x}" y="0" width="0.3" height="4" fill="black"/>`).join("");
-  return `<!doctype html><html><head><meta charset="utf-8"><title>GhostTrace tong markers</title><style>
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Allos tong markers</title><style>
   @page { margin: 12mm; }
   body { margin: 0; background: #fff; color: #000; font: 10pt/1.45 system-ui, sans-serif; }
   h1 { font-size: 13pt; margin: 0 0 2mm; }
@@ -104,7 +104,7 @@ export function createTongMarkerSheet(blackSquareMm: readonly number[] = [25, 30
   .scale { display: flex; align-items: center; gap: 4mm; margin-bottom: 6mm; }
   .scale svg { display: block; }
 </style></head><body>
-<h1>GhostTrace tong markers · OpenCV DICT_4X4_50</h1>
+<h1>Allos tong markers · OpenCV DICT_4X4_50</h1>
 <ol>
   <li>Print at <b>100% scale</b> ("Actual size", not "Fit to page"), on matte paper.</li>
   <li>Measure the bar below. If it isn't exactly 50 mm, fix the print scale and reprint.</li>

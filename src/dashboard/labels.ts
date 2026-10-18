@@ -90,7 +90,7 @@ export const MANUAL_WASH_NOTE = "Fallback for when camera wash detection isn't r
 export const CORRECTIVE_ACTION ="Hold this meal and prepare a replacement with appropriate allergen controls.";
 export const ACK_NOTE = "Acknowledged. The meal stays on hold until the meal or session is reset.";
 export const SCOPE_NOTE =
-  "Exposure is inferred from 2D camera geometry. GhostTrace does not test for allergens and does not confirm cleaning.";
+  "Exposure is inferred from 2D camera geometry. Allos does not test for allergens and does not confirm cleaning.";
 
 const isTool = (id: ExposableSurfaceId): id is ToolSurface => id === "tongs-tip" || id === "tongs-handle";
 

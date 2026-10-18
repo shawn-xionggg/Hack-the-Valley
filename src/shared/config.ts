@@ -1,6 +1,6 @@
-// GhostTrace shared configuration — single source of truth for object IDs,
+// Allos shared configuration — single source of truth for object IDs,
 // surfaces, zones, orders, and tunable thresholds.
-// Spec: GhostTrace-summary-v5.md ("Shared Integration Contract").
+// Spec: Allos-summary-v5.md ("Shared Integration Contract").
 
 export const ALLERGENS = ["peanut"] as const;
 export type Allergen = (typeof ALLERGENS)[number];
@@ -117,6 +117,7 @@ export interface UtensilModel {
   markers: UtensilMarkerModel[];
 }
 export type UtensilModels = Partial<Record<UtensilId, UtensilModel>>;
+// Storage keys keep the project's old name (GhostTrace), so calibrations saved before the rename still load.
 export const UTENSIL_MODELS_STORAGE_KEY = "ghosttrace.utensils.v2";
 
 export interface Order {

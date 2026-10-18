@@ -1,6 +1,6 @@
-// GhostTrace shared event schema — the ONLY way anything changes engine state.
+// Allos shared event schema — the ONLY way anything changes engine state.
 // Engine state is a pure function of the ordered event log: replaying the same
-// events always produces the same state. Spec: GhostTrace-summary-v5.md.
+// events always produces the same state. Spec: Allos-summary-v5.md.
 
 import type { ContactTarget, MealId, Polygon, ToolContactTarget, ToolSurface, UtensilId } from "./config";
 
@@ -79,7 +79,7 @@ export interface SessionResetEvent extends EventBase {
   source: "manual" | "sim";
 }
 
-export type GhostEvent =
+export type AllosEvent =
   | ContactEvent
   | WashEvent
   | UtensilWashedEvent
@@ -88,7 +88,7 @@ export type GhostEvent =
   | MealResetEvent
   | SessionResetEvent;
 
-export type GhostEventKind = GhostEvent["kind"];
+export type AllosEventKind = AllosEvent["kind"];
 
 /**
  * Live status from the vision module for the dashboard (progress ring, debug panel).

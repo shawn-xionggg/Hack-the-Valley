@@ -1,7 +1,7 @@
 import { DEFAULT_TUNING, ORDERS, SURFACES, UTENSILS } from "../shared/config";
 import type { Order, Tuning, UtensilId } from "../shared/config";
 import type { Alert, ChainStep, CreateEngine, EngineState, LogEffect, SurfaceStatus } from "../shared/engine-types";
-import type { GhostEvent } from "../shared/events";
+import type { AllosEvent } from "../shared/events";
 import { buildExposureChain } from "./history";
 import { createObjectRegistry } from "./registry";
 import { applyContact } from "./transfer";
@@ -39,7 +39,7 @@ function alertChain(state: EngineState, recordId: string): ChainStep[] {
 }
 
 /** At most one alert per meal per allergen until that meal is reset. */
-function raiseAlerts(state: EngineState, event: GhostEvent, orders: Order[]) {
+function raiseAlerts(state: EngineState, event: AllosEvent, orders: Order[]) {
   for (const order of orders) for (const allergen of order.allergies) {
     const reset = [...state.log].reverse().find(entry => entry.effect === "applied" &&
       entry.event.kind === "meal-reset" && entry.event.mealId === order.mealId);
@@ -70,7 +70,7 @@ function clearUtensil(state: EngineState, utensilId: UtensilId, eventId: string)
 }
 
 /** One event → next state. Pure apart from `nextSessionId`, which is deterministic per engine. */
-function reduce(state: EngineState, event: GhostEvent, ctx: Context): EngineState {
+function reduce(state: EngineState, event: AllosEvent, ctx: Context): EngineState {
   const seen = state.log.some(entry => entry.event.id === event.id);
   const next = structuredClone(state);
   const log = (effect: LogEffect) => { next.log.push({ event: { ...event }, effect }); return next; };
@@ -150,10 +150,10 @@ export const createEngine: CreateEngine = (options = {}) => {
         state = reduce(state, event, ctx);
       } catch (error) {
         // dispatch never throws: a malformed event leaves state untouched.
-        console.error("GhostTrace engine ignored a malformed event.", event, error);
+        console.error("Allos engine ignored a malformed event.", event, error);
       }
       for (const listener of listeners) {
-        try { listener(state); } catch (error) { console.error("GhostTrace engine listener failed.", error); }
+        try { listener(state); } catch (error) { console.error("Allos engine listener failed.", error); }
       }
       return state;
     },

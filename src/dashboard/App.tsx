@@ -1,4 +1,4 @@
-// GhostTrace dashboard (Person 3): renders EngineState and VisionStatus, and sends the manual events
+// Allos dashboard (Person 3): renders EngineState and VisionStatus, and sends the manual events
 // (wash, acknowledge, reset) through engine.dispatch. Spec §3.3 wording lives in labels.ts. Operator
 // controls also calibrate zones and tongs, sharing storage with the vision page.
 
@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 import { createEngine } from "../engine";
 import { ORDERS } from "../shared/config";
 import type { LoggedEvent } from "../shared/engine-types";
-import type { ContactEvent, GhostEvent, UtensilWashedEvent, WashEvent } from "../shared/events";
+import type { ContactEvent, AllosEvent, UtensilWashedEvent, WashEvent } from "../shared/events";
 import { DEMO_SCRIPT, MOVING_TONGS_SCRIPT } from "../sim/fixtures";
 import { chime } from "./chime";
 import { AlertPanel } from "./components/AlertPanel";
@@ -37,7 +37,7 @@ export function App() {
   const [archivedLog, setArchivedLog] = useState<LoggedEvent[]>([]);
   const eventLog = useMemo(() => [...archivedLog, ...state.log], [archivedLog, state.log]);
 
-  const dispatch = (event: GhostEvent) => engine.dispatch(event);
+  const dispatch = (event: AllosEvent) => engine.dispatch(event);
   const vision = useLiveVision((event: ContactEvent | WashEvent | UtensilWashedEvent) => { if (!simulated) dispatch(event); });
   const live = vision.phase === "live";
   const calibration = useCalibration(vision);
@@ -45,8 +45,8 @@ export function App() {
   const [controlsOpen, setControlsOpen] = useState(false);
   const tracking = live && vision.frame ? vision.frame.status.utensils.tongs.tracking : null;
 
-  // Handy from the console while testing on the rig: ghosttraceEngine.getState().
-  useEffect(() => { Object.assign(window, { ghosttraceEngine: engine }); }, [engine]);
+  // Handy from the console while testing on the rig: allosEngine.getState().
+  useEffect(() => { Object.assign(window, { allosEngine: engine }); }, [engine]);
   useEffect(() => () => simulator.cancel(), [simulator]);
 
   // Chime once per new, unacknowledged alert. Alert ids repeat across sessions, so forget them on reset.
@@ -64,7 +64,7 @@ export function App() {
     const currentLog = engine.getState().log;
     if (currentLog.length) setArchivedLog(previous => [...previous, ...currentLog]);
   }, [engine]);
-  const simulate = (script: GhostEvent[]) => {
+  const simulate = (script: AllosEvent[]) => {
     archiveCurrentLog();
     setSimulated(true);
     simulator.play(script);
@@ -88,7 +88,7 @@ export function App() {
         </div>
       )}
       <header className="topbar">
-        <div className="brand"><span className="brand-mark" aria-hidden="true">◌</span> GhostTrace</div>
+        <div className="brand"><span className="brand-mark" aria-hidden="true">◌</span> Allos</div>
         {order && (
           <div className={`order-chip${state.surfaces[order.mealId].status === "action-required" ? " alerting" : ""}`}>
             <strong>{order.displayName}</strong> — {order.allergies.map(a => a[0]!.toUpperCase() + a.slice(1)).join(", ")} allergy
