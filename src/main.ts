@@ -46,7 +46,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
           <div class="empty-state" id="empty"><div class="camera-icon" aria-hidden="true">◎</div><h3>Your workspace, in view.</h3><p>Start your camera to begin live hand tracking.<br />Frames are processed on this device.</p></div>
           <span class="stage-label">GHOSTTRACE / LIVE</span>
         </div>
-        <div class="camera-toolbar"><div class="camera-select"><label for="camera">Camera source</label><select id="camera"><option value="">Default camera</option></select></div>
+        <div class="camera-toolbar"><div class="camera-select"><label for="camera">Camera source</label><select id="camera"><option value="">Auto — main rear camera</option></select></div>
           <label class="check"><input type="checkbox" id="mirror" /> Mirror</label>
           <button class="primary" id="start">Start camera <span aria-hidden="true">↗</span></button><button class="secondary" id="stop" disabled>Stop</button>
         </div>
@@ -420,6 +420,16 @@ async function startCamera() {
       () => attempt === generation);
     if (attempt !== generation) { nextStream.getTracks().forEach(track => track.stop()); return; }
     stream = nextStream;
+    const cameraName = stream.getVideoTracks()[0]?.label || "Camera name unavailable";
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      if (attempt !== generation) return;
+      const selected = stream.getVideoTracks()[0]?.getSettings().deviceId;
+      camera.replaceChildren(new Option("Auto — main rear camera", ""),
+        ...devices.filter(d => d.kind === "videoinput").map((device, i) => new Option(device.label || `Camera ${i + 1}`, device.deviceId)));
+      if (selected) camera.value = selected;
+    } catch { /* The track label still identifies the active stream. */ }
+    if (attempt !== generation) return;
     video.srcObject = stream;
     await video.play();
     if (attempt !== generation) return;
@@ -429,7 +439,7 @@ async function startCamera() {
     el("resolution").textContent = `${canvas.width} × ${canvas.height} / RAW`;
     el("model-state").textContent = "Loading…";
     el("marker-status").textContent = "Starting…";
-    message("Camera connected. Downloading the hand-tracking model — the first start may take a moment…");
+    message(`${cameraName} connected. Downloading the hand-tracking model — the first start may take a moment…`);
     draw();
     const handle = await startVision({ video, zones, utensilModels, onEvent: logEvent, handContactDwellMs,
       onStatus: next => { updateStatus(next); draw(); },
@@ -447,17 +457,10 @@ async function startCamera() {
     el("badge").textContent = "● Tracking live";
     el("badge").classList.add("live");
     camera.disabled = false;
-    message("Tracking live. Hold your hands in view, or select a zone to calibrate it.");
+    message(`Tracking live — ${cameraName}. Hold your hands in view, or select a zone to calibrate it.`);
     stream.getVideoTracks()[0]?.addEventListener("ended", () => {
       if (attempt === generation) stopCamera("Camera disconnected. Reconnect it and start again.");
     });
-    try {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      if (attempt !== generation) return;
-      const selected = stream?.getVideoTracks()[0]?.getSettings().deviceId;
-      camera.replaceChildren(...devices.filter(d => d.kind === "videoinput").map((device, i) => new Option(device.label || `Camera ${i + 1}`, device.deviceId)));
-      if (selected) camera.value = selected;
-    } catch { /* Camera discovery is optional once the stream is running. */ }
   } catch (error) {
     if (attempt !== generation) return;
     stopCamera();
